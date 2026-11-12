@@ -46,12 +46,13 @@ djkit/
 ├── CHANGELOG.md
 ├── djkit-docs.md        # questo file
 ├── errors.py            # eccezioni di dominio e conferme
-├── api.py               # handler HTTP delle eccezioni, schemi comuni
+├── api.py               # handler HTTP delle eccezioni, schemi comuni, decoratori CSRF
+├── auth.py              # validazione password, login a sessione
 ├── audit.py             # registro delle operazioni (modello astratto + log_write)
 ├── updates.py           # modifica parziale di un oggetto
 ├── fields.py            # campi a scelta, importi, vincoli CHECK
 ├── access.py            # lettura di un oggetto accessibile all'utente, o 404
-├── db.py                # QuerySet con filtro di accesso, subquery di somma/conteggio
+├── db.py                # QuerySet con filtro di accesso, subquery, controllo di unicità
 ├── dates.py             # date mensili e scadenze
 ├── validators.py        # normalizzazione di dati personali generici
 ├── it.py                # dati italiani: codice fiscale
@@ -62,7 +63,7 @@ djkit/
 └── tests/               # test del framework
 ```
 
-Dipendenze interne: `api` → `errors`; `access` → `errors`; `audit` → `fields`;
+Dipendenze interne: `api` → `errors`; `access` → `errors`; `auth` → `errors`; `db` → `errors`; `audit` → `fields`;
 `updates` → `errors`, `audit` (`snapshot`, `diff`). Tutti gli altri moduli sono indipendenti tra loro.
 
 `djkit` non ha un modulo `models`: i modelli astratti (`audit.AuditEntryBase`) si importano dal loro modulo e
@@ -127,10 +128,41 @@ require_confirmation(payload.confirmations, 2 if has_money_rows else 1, impact)
   registrata più vicina, perché Ninja cerca l'handler lungo l'MRO.
 - `ErrorOut`: schema `{detail: str, errors?: {campo: [str]}, impact?: dict, required?: int, given?: int}`.
 - `ConfirmationIn`: schema `{confirmations: int = 0}` (≥ 0), il numero di conferme date dal client.
+- `csrf_protected`: decoratore di operazione (`decorate_view(csrf_protect)`) che impone il controllo CSRF di
+  Django. Serve sugli endpoint pubblici con `auth=None` che modificano lo stato (login, registrazione): Ninja
+  controlla il token CSRF solo dentro l'autenticazione a sessione (`django_auth`), quindi senza il decoratore
+  questi endpoint accetterebbero richieste da altri siti. Token assente o errato → 403.
+- `sets_csrf_cookie`: decoratore di operazione (`decorate_view(ensure_csrf_cookie)`) che invia sempre il cookie
+  CSRF nella risposta, così un client single-page può leggerlo e rimandarlo nell'header.
 
 ```python
 api = NinjaAPI(auth=django_auth)   # django_auth (cookie di sessione) controlla già il token CSRF
 register_error_handlers(api)
+
+@api.get("/csrf", auth=None, response={204: None})
+@sets_csrf_cookie
+def csrf(request):
+    return 204, None
+
+@api.post("/login", auth=None)
+@csrf_protected
+def login(request, payload: LoginIn): ...
+```
+
+### 4.2b `auth` — Password e login a sessione ✅
+
+Funzionano con qualunque modello utente (usano solo `django.contrib.auth`).
+
+- `validate_new_password(password: str, user=None, field: str = "password") -> None`: applica
+  `AUTH_PASSWORD_VALIDATORS`; se la password non va bene solleva `InvalidData(errors={field: [messaggi]})`.
+  `user` (anche non ancora salvato) permette ai validatori di confrontare la password con i dati dell'utente.
+- `login_with_password(request, username: str, password: str, detail: str | None = None) -> user`:
+  `authenticate()` + `login()` (imposta il cookie di sessione). Credenziali errate o utente non attivo →
+  `InvalidData` con lo stesso messaggio (`detail`, oppure `DEFAULT_LOGIN_FAILED_DETAIL = "Invalid credentials."`),
+  così non si rivela se l'account esiste. `username` è il valore di `USERNAME_FIELD`, già normalizzato dal chiamante.
+
+```python
+user = login_with_password(request, normalize_email_address(payload.email), payload.password)
 ```
 
 ### 4.3 `audit` — Registro delle operazioni ✅
@@ -235,6 +267,15 @@ Invoice.objects.accessible_by(request.user)
 - `count_subquery(queryset) -> Coalesce`: subquery correlata con il numero di righe, 0 se non ce ne sono.
 - `date_filter(field: str, as_of: date | None) -> Q`: restituisce `Q(field__lte=as_of)`, oppure `Q()` vuoto
   se `as_of` è `None`.
+- `ensure_unique(model, values: dict, exclude_pk=None, messages: dict | None = None) -> None`: controlla ogni campo
+  di `values` (già normalizzato; i `None` sono saltati) e, se un'altra riga usa già quel valore, solleva
+  `Conflict(errors={campo: [messaggio]})` con tutti i campi occupati; `detail` unisce i messaggi distinti.
+  `exclude_pk` esclude la riga in modifica; `messages` sostituisce `DEFAULT_UNIQUE_MESSAGE`
+  (`"This value is already used."`). Si chiama prima di salvare, per rispondere 409 invece di 422.
+
+```python
+ensure_unique(Customer, {"email": email, "vat_number": vat}, exclude_pk=customer.pk)
+```
 
 ### 4.7 `dates` — Date mensili ✅
 

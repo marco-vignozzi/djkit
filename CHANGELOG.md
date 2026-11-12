@@ -3,6 +3,17 @@
 All notable changes to djkit. Versions follow semantic versioning
 (MAJOR: incompatible changes, MINOR: new features, PATCH: fixes).
 
+## [0.2.0] — unreleased
+
+### Added
+- `auth` (new module): `validate_new_password` (password validators ->
+  `InvalidData` on a field), `login_with_password` (authenticate + login,
+  generic `InvalidData` on failure), `DEFAULT_LOGIN_FAILED_DETAIL`.
+- `db`: `ensure_unique` (values already used by other rows -> `Conflict`
+  with per-field errors), `DEFAULT_UNIQUE_MESSAGE`.
+- `api`: `csrf_protected` and `sets_csrf_cookie` operation decorators for
+  public (`auth=None`) endpoints of a session-based API.
+
 ## [0.1.0] — unreleased
 
 ### Added

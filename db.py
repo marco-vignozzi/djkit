@@ -9,6 +9,8 @@ Query helpers.
     - sum_subquery / count_subquery: correlated subqueries for annotate(),
       returning 0 instead of NULL when there are no rows.
     - date_filter: optional "on or before a date" filter.
+    - ensure_unique: raise Conflict when values are already used by other
+      rows (checked before saving, to answer 409 instead of 422).
 """
 
 from datetime import date
@@ -17,6 +19,45 @@ from decimal import Decimal
 from django.db import models
 from django.db.models import DecimalField, F, Func, IntegerField, Q, Subquery, Value
 from django.db.models.functions import Coalesce
+
+from .errors import Conflict
+
+# Message of ensure_unique for a field without a custom message.
+DEFAULT_UNIQUE_MESSAGE = "This value is already used."
+
+
+def ensure_unique(model: type[models.Model], values: dict, exclude_pk=None, messages: dict | None = None) -> None:
+    """
+    Check that no other row already uses the given values.
+
+    Each field is checked on its own (e.g. email and tax code are two
+    separate unique fields), and every field already taken is reported.
+
+    Args:
+        model: the model class (or a QuerySet's model) to search.
+        values: {field name: value}, already normalized as they will be
+            saved; None values are skipped.
+        exclude_pk: primary key of the row being updated, which may keep
+            its own values; None when creating.
+        messages: optional {field name: message} replacing
+            DEFAULT_UNIQUE_MESSAGE.
+
+    Raises:
+        Conflict: errors={field: [message]} for every value already used;
+            `detail` joins the distinct messages.
+    """
+    messages = messages or {}
+    others = model._default_manager.all()
+    if exclude_pk is not None:
+        others = others.exclude(pk=exclude_pk)
+    taken = {
+        field: [messages.get(field, DEFAULT_UNIQUE_MESSAGE)]
+        for field, value in values.items()
+        if value is not None and others.filter(**{field: value}).exists()
+    }
+    if taken:
+        distinct = dict.fromkeys(message for field_messages in taken.values() for message in field_messages)
+        raise Conflict(" ".join(distinct), errors=taken)
 
 
 def sum_subquery(

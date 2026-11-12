@@ -6,6 +6,7 @@ djkit/tests/urls.py.
 Run with: python manage.py test djkit.tests.test_api
 """
 
+from django.conf import settings
 from django.test import override_settings
 
 from djkit.testing.api import ApiClient, ApiTestCase, make_user
@@ -88,6 +89,30 @@ class SessionAndCsrfTests(ApiTestCase):
         self.assertNotAccessible(client, "get", "/api/public/not-found")
         with self.assertRaises(AssertionError):
             self.assertNotAccessible(client, "get", "/api/public/conflict")
+
+
+@override_settings(ROOT_URLCONF="djkit.tests.urls")
+class PublicCsrfTests(ApiTestCase):
+    """sets_csrf_cookie and csrf_protected on public (auth=None) endpoints."""
+
+    def test_csrf_endpoint_sets_the_cookie(self):
+        """GET with no cookie -> 204 and a csrftoken cookie in the response."""
+        client = ApiClient()
+        client.cookies.clear()
+        response = client.get("/api/public/csrf")
+        self.assertStatus(response, 204)
+        self.assertIn(settings.CSRF_COOKIE_NAME, response.cookies)
+
+    def test_protected_public_endpoint_accepts_the_token(self):
+        """Anonymous client with the CSRF header -> 200."""
+        response = self.client_for().post("/api/public/protected-echo", {"name": "Anna"})
+        self.assertStatus(response, 200)
+        self.assertEqual(response.json(), {"name": "Anna"})
+
+    def test_protected_public_endpoint_rejects_missing_token(self):
+        """Anonymous client without the CSRF header -> 403."""
+        client = self.client_for(send_csrf_token=False)
+        self.assertStatus(client.post("/api/public/protected-echo", {"name": "Anna"}), 403)
 
 
 class MakeUserTests(ApiTestCase):

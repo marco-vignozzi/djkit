@@ -5,15 +5,27 @@ Django Ninja integration.
     - ConfirmationIn: body of destructive requests (number of confirmations).
     - register_error_handlers(api): maps the djkit.errors exceptions (and
       Django's ValidationError) to HTTP responses.
+    - csrf_protected / sets_csrf_cookie: operation decorators for public
+      endpoints (auth=None) of a session-based API.
 
 Typical setup:
 
     api = NinjaAPI(auth=django_auth)   # django_auth already enforces CSRF
     register_error_handlers(api)
+
+    @api.get("/csrf", auth=None, response={204: None})
+    @sets_csrf_cookie                  # the client reads the csrftoken cookie
+    def csrf(request): ...
+
+    @api.post("/login", auth=None)
+    @csrf_protected                    # auth=None skips Ninja's CSRF check
+    def login(request, payload: LoginIn): ...
 """
 
 from django.core.exceptions import ValidationError
+from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from ninja import Field, NinjaAPI, Schema
+from ninja.decorators import decorate_view
 
 from .errors import Conflict, ConfirmationRequired, DomainError, InvalidData, NotFound
 
@@ -26,6 +38,18 @@ DEFAULT_STATUS_CODES: dict[type[DomainError], int] = {
     InvalidData: 422,
     ConfirmationRequired: 428,
 }
+
+
+# Operation decorator enforcing Django's CSRF check. Needed on public unsafe
+# endpoints (auth=None) such as login or registration: Ninja checks the CSRF
+# token only inside session authentication (django_auth), so without it these
+# endpoints would accept cross-site requests (login CSRF). Missing or wrong
+# token -> 403.
+csrf_protected = decorate_view(csrf_protect)
+
+# Operation decorator that always sends the CSRF cookie in the response, so a
+# single-page client can read it and send it back in the CSRF header.
+sets_csrf_cookie = decorate_view(ensure_csrf_cookie)
 
 
 class ErrorOut(Schema):

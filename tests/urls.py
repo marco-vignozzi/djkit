@@ -11,7 +11,8 @@ from django.urls import path
 from ninja import NinjaAPI, Schema
 from ninja.security import django_auth
 
-from djkit.api import ConfirmationIn, register_error_handlers
+from djkit.api import ConfirmationIn, csrf_protected, register_error_handlers, sets_csrf_cookie
+from djkit.auth import login_with_password
 from djkit.errors import Conflict, DomainError, InvalidData, NotFound, require_confirmation
 
 
@@ -25,7 +26,14 @@ class NameIn(Schema):
     name: str
 
 
-api = NinjaAPI(urls_namespace="djkit-tests", auth=django_auth)
+class CredentialsIn(Schema):
+    """Body of the test login endpoint."""
+
+    username: str
+    password: str
+
+
+api =NinjaAPI(urls_namespace="djkit-tests", auth=django_auth)
 register_error_handlers(api, {PaymentRequired: 402})
 
 
@@ -70,6 +78,28 @@ def confirm(request, payload: ConfirmationIn):
 def echo(request, payload: NameIn):
     """Logged-in only (session + CSRF): returns the user's pk and the name."""
     return {"user": request.user.pk, "name": payload.name}
+
+
+@api.get("/public/csrf", auth=None, response={204: None})
+@sets_csrf_cookie
+def csrf(request):
+    """Public: always sets the CSRF cookie, 204."""
+    return 204, None
+
+
+@api.post("/public/protected-echo", auth=None, response={200: dict})
+@csrf_protected
+def protected_echo(request, payload: NameIn):
+    """Public but CSRF-protected: echoes the name (403 without the token)."""
+    return {"name": payload.name}
+
+
+@api.post("/public/login", auth=None, response={200: dict})
+@csrf_protected
+def login(request, payload: CredentialsIn):
+    """Public login with login_with_password: returns the user's pk (422 on wrong credentials)."""
+    user = login_with_password(request, payload.username, payload.password)
+    return {"user": user.pk}
 
 
 urlpatterns = [path("api/", api.urls)]

@@ -17,7 +17,41 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.models import OuterRef, Q
 from django.test import SimpleTestCase, TestCase
 
-from djkit.db import AccessibleQuerySet, count_subquery, date_filter, sum_subquery
+from djkit.db import DEFAULT_UNIQUE_MESSAGE, AccessibleQuerySet, count_subquery, date_filter, ensure_unique, sum_subquery
+from djkit.errors import Conflict
+
+
+class EnsureUniqueTests(TestCase):
+    """ensure_unique raises Conflict for values already used by other rows."""
+
+    def setUp(self):
+        """Two groups: 'staff' and 'sales'."""
+        self.staff = Group.objects.create(name="staff")
+        Group.objects.create(name="sales")
+
+    def test_free_value_passes(self):
+        """name 'support' (unused) -> no error."""
+        ensure_unique(Group, {"name": "support"})
+
+    def test_used_value_raises_conflict_on_its_field(self):
+        """name 'sales' -> Conflict with errors {'name': [default message]}."""
+        with self.assertRaises(Conflict) as caught:
+            ensure_unique(Group, {"name": "sales"})
+        self.assertEqual(caught.exception.extra["errors"], {"name": [DEFAULT_UNIQUE_MESSAGE]})
+        self.assertEqual(caught.exception.detail, DEFAULT_UNIQUE_MESSAGE)
+
+    def test_row_being_updated_may_keep_its_value(self):
+        """name 'staff' with exclude_pk of 'staff' -> no error; of another row -> Conflict."""
+        ensure_unique(Group, {"name": "staff"}, exclude_pk=self.staff.pk)
+        with self.assertRaises(Conflict):
+            ensure_unique(Group, {"name": "staff"}, exclude_pk=self.staff.pk + 100)
+
+    def test_custom_message_and_none_values(self):
+        """Custom message for 'name' used in errors and detail; a None value is skipped."""
+        with self.assertRaises(Conflict) as caught:
+            ensure_unique(Group, {"name": "sales", "id": None}, messages={"name": "Name taken."})
+        self.assertEqual(caught.exception.extra["errors"], {"name": ["Name taken."]})
+        self.assertEqual(caught.exception.detail, "Name taken.")
 
 
 class DateFilterTests(SimpleTestCase):
