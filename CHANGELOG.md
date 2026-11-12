@@ -17,6 +17,21 @@ All notable changes to djkit. Versions follow semantic versioning
   `DJKIT_TEST_EXCLUDED_DIRS` and `DJKIT_TEST_EXCLUDED_FILES`; the settings
   package and `djkit.testing` are always excluded from the reported files.
 
+- `errors`: `DomainError` (`detail`, `extra`, `payload()`), `NotFound`,
+  `Conflict`, `InvalidData` (+ `from_validation_error`), `ConfirmationRequired`,
+  `require_confirmation`.
+- `api`: `register_error_handlers` (custom status codes, Django
+  `ValidationError` -> 422), `ErrorOut`, `ConfirmationIn`.
+- `audit`: `AuditAction`, abstract `AuditEntryBase` (+ `action_constraint`;
+  `actor` reverse accessor `<app>_<class>_entries`, unique per subclass),
+  `log_write`, `snapshot`, `diff`, `to_json_value`; setting
+  `DJKIT_AUDIT_EXCLUDED_FIELDS`.
+- `updates`: `apply_patch`.
+- `access`: `get_accessible_or_404`.
+- `fields`: `choice_field`, `choices_constraint`, `money_field`,
+  `positive_constraint`.
+- `testing.api`: `ApiClient`, `make_user`, `ApiTestCase`.
+
 ### Fixed
 - `readable_name` removes only one `test_` prefix
   ("test_testing_tools" -> "testing tools", was "ing tools").
