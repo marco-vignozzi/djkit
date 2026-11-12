@@ -7,12 +7,13 @@ Run with: python manage.py test djkit.tests.test_api
 """
 
 from django.conf import settings
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 
+from djkit.api import NON_FIELD_ERRORS, error_field, validation_errors, validation_message
 from djkit.testing.api import ApiClient, ApiTestCase, make_user
 
 
-@override_settings(ROOT_URLCONF="djkit.tests.urls")
+@override_settings(ROOT_URLCONF="djkit.tests.urls", DJKIT_MESSAGES={})
 class ErrorHandlerTests(ApiTestCase):
     """Domain errors become HTTP responses with an ErrorOut body."""
 
@@ -113,6 +114,98 @@ class PublicCsrfTests(ApiTestCase):
         """Anonymous client without the CSRF header -> 403."""
         client = self.client_for(send_csrf_token=False)
         self.assertStatus(client.post("/api/public/protected-echo", {"name": "Anna"}), 403)
+
+
+@override_settings(ROOT_URLCONF="djkit.tests.urls", DJKIT_MESSAGES={})
+class NinjaErrorTests(ApiTestCase):
+    """Errors produced by Django Ninja itself answer with ErrorOut and djkit messages."""
+
+    def test_anonymous_request_gets_unauthorized_message(self):
+        """No session -> 401 {'detail': 'Authentication required.'} (not Ninja's 'Unauthorized')."""
+        response = self.client.post("/api/echo", {"name": "x"})
+        self.assertStatus(response, 401)
+        self.assertEqual(response.json(), {"detail": "Authentication required."})
+
+    def test_session_csrf_failure_gets_csrf_message(self):
+        """Logged in without the CSRF header -> 403 with the 'csrf_failed' message."""
+        client = self.client_for(make_user(), send_csrf_token=False)
+        response = client.post("/api/echo", {"name": "Anna"})
+        self.assertStatus(response, 403)
+        self.assertEqual(response.json(), {"detail": "Security check failed: reload the page and try again."})
+
+    def test_schema_errors_are_per_field_messages(self):
+        """name 'A' and age -1 -> 422 'Invalid data.' with one message on 'name' and one on 'age'."""
+        response = self.client.post("/api/public/person", {"name": "A", "age": -1})
+        self.assertStatus(response, 422)
+        self.assertEqual(
+            response.json(),
+            {
+                "detail": "Invalid data.",
+                "errors": {
+                    "name": ["Enter at least 2 characters."],
+                    "age": ["Enter a value greater than or equal to 0."],
+                },
+            },
+        )
+
+    def test_missing_and_wrong_type_fields(self):
+        """Body {'age': 'abc'} -> 'name' required, 'age' not a number."""
+        response = self.client.post("/api/public/person", {"age": "abc"})
+        self.assertStatus(response, 422)
+        self.assertEqual(
+            response.json()["errors"],
+            {"name": ["This field is required."], "age": ["Enter a valid number."]},
+        )
+
+    def test_malformed_json_body(self):
+        """Body 'not json' -> 400 {'detail': 'The request body is not valid JSON.'} (Ninja refuses to parse it)."""
+        response = self.client.post("/api/public/person", "not json")
+        self.assertStatus(response, 400)
+        self.assertEqual(response.json(), {"detail": "The request body is not valid JSON."})
+
+    def test_http404_inside_operation(self):
+        """Http404('Technical message never shown.') -> 404 {'detail': 'Not found.'}."""
+        response = self.client.get("/api/public/http404")
+        self.assertStatus(response, 404)
+        self.assertEqual(response.json(), {"detail": "Not found."})
+
+
+class ValidationHelperTests(SimpleTestCase):
+    """error_field and validation_message turn Pydantic errors into readable ones."""
+
+    def test_error_field_drops_source_and_parameter(self):
+        """('body','payload','email') -> 'email'; ('query','usable') -> 'usable'; nested -> dotted; ('body','payload') -> '__all__'."""
+        self.assertEqual(error_field(("body", "payload", "email")), "email")
+        self.assertEqual(error_field(("query", "usable")), "usable")
+        self.assertEqual(error_field(("body", "payload", "items", 0, "amount")), "items.0.amount")
+        self.assertEqual(error_field(("body", "payload")), NON_FIELD_ERRORS)
+
+    @override_settings(DJKIT_MESSAGES={})
+    def test_validation_message_by_type(self):
+        """string_too_long with max_length 5 -> 'Enter at most 5 characters.'; unknown type -> 'Invalid value.'."""
+        self.assertEqual(
+            validation_message({"type": "string_too_long", "ctx": {"max_length": 5}}),
+            "Enter at most 5 characters.",
+        )
+        self.assertEqual(validation_message({"type": "something_new"}), "Invalid value.")
+
+    def test_value_error_keeps_validator_message(self):
+        """value_error with ctx error ValueError('Data di fine prima dell'inizio.') -> that text."""
+        error = {"type": "value_error", "ctx": {"error": ValueError("Data di fine prima dell'inizio.")}}
+        self.assertEqual(validation_message(error), "Data di fine prima dell'inizio.")
+
+    @override_settings(DJKIT_MESSAGES={})
+    def test_validation_errors_groups_by_field(self):
+        """Two errors on 'name' and one on 'age' -> {'name': [two], 'age': [one]}."""
+        errors = [
+            {"type": "missing", "loc": ("body", "payload", "name")},
+            {"type": "string_type", "loc": ("body", "payload", "name")},
+            {"type": "int_parsing", "loc": ("body", "payload", "age")},
+        ]
+        self.assertEqual(
+            validation_errors(errors),
+            {"name": ["This field is required.", "Enter a text."], "age": ["Enter a valid number."]},
+        )
 
 
 class MakeUserTests(ApiTestCase):

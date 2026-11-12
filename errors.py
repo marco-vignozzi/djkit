@@ -7,10 +7,15 @@ djkit.api.register_error_handlers translates them into responses
 ConfirmationRequired -> 428).
 
 Every exception carries a user-facing `detail` message and optional extra
-data that ends up in the response body next to it (see payload()).
+data that ends up in the response body next to it (see payload()). When no
+message is given, `detail` is the text of the class's `message_key` in
+djkit.messages (English by default, the project's language through the
+DJKIT_MESSAGES setting).
 """
 
 from django.core.exceptions import ValidationError
+
+from .messages import get_message
 
 
 class DomainError(Exception):
@@ -18,21 +23,23 @@ class DomainError(Exception):
     Base class of the domain exceptions.
 
     Attributes:
-        default_detail: message used when none is given.
+        message_key: key (djkit.messages) of the message used when none is
+            given.
         detail: user-facing message.
         extra: additional JSON-serializable data for the response body.
     """
 
-    default_detail = "Request failed."
+    message_key = "domain_error"
 
     def __init__(self, detail: str | None = None, **extra):
         """
         Args:
-            detail: user-facing message; default_detail when omitted.
+            detail: user-facing message; the text of message_key when
+                omitted.
             **extra: additional data for the response body (None values are
                 dropped), e.g. errors={"email": ["Already used."]}.
         """
-        self.detail = detail or self.default_detail
+        self.detail = detail or get_message(self.message_key)
         self.extra = {key: value for key, value in extra.items() if value is not None}
         super().__init__(self.detail)
 
@@ -53,13 +60,13 @@ class NotFound(DomainError):
     object of another user exists.
     """
 
-    default_detail = "Not found."
+    message_key = "not_found"
 
 
 class Conflict(DomainError):
     """The request conflicts with the current state (value already used, read-only object, ...)."""
 
-    default_detail = "Conflict with the current state."
+    message_key = "conflict"
 
 
 class InvalidData(DomainError):
@@ -69,7 +76,7 @@ class InvalidData(DomainError):
     Pass `errors={"field": ["message", ...]}` to point at specific fields.
     """
 
-    default_detail = "Invalid data."
+    message_key = "invalid_data"
 
     @classmethod
     def from_validation_error(cls, error: ValidationError) -> "InvalidData":
@@ -99,7 +106,7 @@ class ConfirmationRequired(DomainError):
     so it can ask the user and repeat the request.
     """
 
-    default_detail = "Confirmation required."
+    message_key = "confirmation_required"
 
     def __init__(self, impact: dict, required: int, given: int, detail: str | None = None):
         """
@@ -107,7 +114,8 @@ class ConfirmationRequired(DomainError):
             impact: summary of what would be lost, e.g. {"invoices": 12}.
             required: number of confirmations needed.
             given: number of confirmations received.
-            detail: user-facing message; default_detail when omitted.
+            detail: user-facing message; the text of message_key when
+                omitted.
         """
         super().__init__(detail, impact=impact, required=required, given=given)
         self.impact = impact

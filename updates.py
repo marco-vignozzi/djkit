@@ -12,6 +12,7 @@ from django.db import models
 
 from .audit import diff, snapshot
 from .errors import InvalidData
+from .messages import get_message
 
 
 def apply_patch(obj: models.Model, data: dict, allowed: set[str] | None = None) -> dict:
@@ -44,7 +45,7 @@ def apply_patch(obj: models.Model, data: dict, allowed: set[str] | None = None) 
         except FieldDoesNotExist:
             field = None
         if field is None or not field.concrete or field.primary_key or (allowed is not None and name not in allowed):
-            rejected[name] = ["This field cannot be changed."]
+            rejected[name] = [get_message("field_not_editable")]
         else:
             fields[name] = field
     if rejected:

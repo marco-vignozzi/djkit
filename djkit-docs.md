@@ -34,6 +34,10 @@ Legenda: ✅ implementato e testato · 📝 progettato, non ancora implementato 
 6. **Documentazione.** Ogni funzione e classe ha una docstring in inglese. Questo file ne descrive struttura e uso.
 7. **Cosa entra in `djkit`.** Un helper entra in `djkit` se funzionerebbe identico in qualunque progetto
    Django + Ninja, senza conoscerne il dominio. Altrimenti resta nel progetto.
+8. **Testi per l'utente per chiave.** `djkit` non scrive mai un testo per l'utente direttamente nel codice: usa
+   una chiave di `messages` con un testo predefinito in inglese, che il progetto sostituisce nella sua lingua con
+   `DJKIT_MESSAGES` (§4.0). Anche i messaggi di Django, Ninja o Pydantic che arrivano all'utente passano da qui
+   (handler di `api`, viste di `views`, validatori di `auth`). Ogni nuova chiave va documentata in §4.0.
 
 ---
 
@@ -45,9 +49,11 @@ djkit/
 ├── apps.py              # DjkitConfig (AppConfig)
 ├── CHANGELOG.md
 ├── djkit-docs.md        # questo file
+├── messages.py          # messaggi per l'utente, per chiave (sostituibili con DJKIT_MESSAGES)
 ├── errors.py            # eccezioni di dominio e conferme
-├── api.py               # handler HTTP delle eccezioni, schemi comuni, decoratori CSRF
-├── auth.py              # validazione password, login a sessione
+├── api.py               # handler HTTP delle eccezioni (anche di Ninja/Pydantic), schemi comuni, decoratori CSRF
+├── views.py             # viste d'errore di Django in JSON (CSRF, 400, 403, 404, 500)
+├── auth.py              # validazione password, login a sessione, validatori password
 ├── audit.py             # registro delle operazioni (modello astratto + log_write)
 ├── updates.py           # modifica parziale di un oggetto
 ├── fields.py            # campi a scelta, importi, vincoli CHECK
@@ -63,8 +69,9 @@ djkit/
 └── tests/               # test del framework
 ```
 
-Dipendenze interne: `api` → `errors`; `access` → `errors`; `auth` → `errors`; `db` → `errors`; `audit` → `fields`;
-`updates` → `errors`, `audit` (`snapshot`, `diff`). Tutti gli altri moduli sono indipendenti tra loro.
+Dipendenze interne: `errors` → `messages`; `api` → `errors`, `messages`; `views` → `messages`;
+`access` → `errors`; `auth` → `errors`, `messages`; `db` → `errors`, `messages`; `audit` → `fields`;
+`updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`). Tutti gli altri moduli sono indipendenti tra loro.
 
 `djkit` non ha un modulo `models`: i modelli astratti (`audit.AuditEntryBase`) si importano dal loro modulo e
 vanno usati solo durante il caricamento dei modelli del progetto (cioè dentro il suo `models.py`).
@@ -84,6 +91,7 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 | `DJKIT_TEST_EXCLUDED_DIRS` | `{"tests", "migrations", ".venv", "venv", "site-packages"}` | `testing.runner` | parti di percorso mai mostrate come "codice sotto test"; il valore **sostituisce** il default. Le cartelle del modulo settings (da `SETTINGS_MODULE`, es. `config` per `config.settings`) sono sempre escluse in aggiunta | ✅ |
 | `DJKIT_TEST_EXCLUDED_FILES` | `{"tests.py", "factories.py", "apps.py", "admin.py", "__init__.py"}` | `testing.runner` | nomi di file mai mostrati come "codice sotto test"; il valore **sostituisce** il default | ✅ |
 | `DJKIT_AUDIT_EXCLUDED_FIELDS` | `{"password"}` | `audit`, `updates` | campi mai scritti nel registro (né nelle `snapshot`, né nei `diff`); il valore **sostituisce** il default | ✅ |
+| `DJKIT_MESSAGES` | `{}` | `messages` (e quindi `errors`, `api`, `views`, `auth`, `db`, `updates`) | testi dei messaggi per l'utente, `{chiave: testo}`; le chiavi assenti restano col testo inglese di `DEFAULT_MESSAGES`. Un progetto in un'altra lingua le fornisce **tutte** (vedi §4.0) | ✅ |
 | `DJKIT_DEMO_MODE` | `False` | `mail` | se vero le email non partono e vengono solo registrate nel log (il progetto può passarlo anche come parametro) | 📝 |
 
 `BASE_DIR` (setting standard dei progetti Django) è usato da `testing.runner` per decidere quali file appartengono
@@ -93,19 +101,55 @@ al progetto.
 
 ## 4. Moduli e funzionalità
 
+### 4.0 `messages` — Messaggi per l'utente ✅
+
+Ogni testo che `djkit` può mostrare all'utente finale (dettaglio degli errori, errori dei campi, messaggi dei
+validatori, errori HTTP di Ninja/Pydantic) ha una **chiave** e un testo predefinito **in inglese** in
+`DEFAULT_MESSAGES`. Il progetto mostra la propria lingua fornendo i testi nel setting `DJKIT_MESSAGES`: il codice
+di `djkit` resta in inglese, ma nessun messaggio inglese arriva all'utente.
+
+- `DEFAULT_MESSAGES: dict[str, str]`: chiave → testo inglese. Gruppi di chiavi:
+  - eccezioni: `domain_error`, `not_found`, `conflict`, `invalid_data`, `confirmation_required`;
+  - `db`/`updates`: `unique`, `field_not_editable`;
+  - `auth`: `login_failed`, `password_too_short` (`{min_length}`), `password_too_similar`;
+  - errori HTTP: `bad_request`, `unauthorized`, `forbidden`, `csrf_failed`, `method_not_allowed`,
+    `too_many_requests`, `server_error`;
+  - validazione degli schemi: `missing`, `invalid_value`, `invalid_json`, `string_type`, `string_too_short`
+    (`{min_length}`), `string_too_long` (`{max_length}`), `number_type`, `boolean_type`, `date_type`,
+    `datetime_type`, `greater_than` (`{gt}`), `greater_than_equal` (`{ge}`), `less_than` (`{lt}`),
+    `less_than_equal` (`{le}`), `max_digits` (`{max_digits}`), `decimal_places` (`{decimal_places}`), `choice`,
+    `list_type`, `object_type`.
+- `get_message(key: str, **params) -> str`: testo del progetto (`DJKIT_MESSAGES`) o quello inglese, con i
+  segnaposto `{nome}` riempiti (`str.format`); se manca il valore di un segnaposto restituisce il testo così com'è.
+  Chiave sconosciuta → `KeyError`. Accetta anche chiavi definite solo dal progetto in `DJKIT_MESSAGES`.
+- `missing_messages() -> list[str]`: chiavi di `DEFAULT_MESSAGES` che il progetto non ha fornito, ordinate. Un
+  progetto che non deve mai mostrare i testi inglesi verifica in un test che la lista sia vuota.
+- `configured_messages() -> dict[str, str]`: il setting `DJKIT_MESSAGES` (o `{}`).
+
+```python
+# settings.py
+DJKIT_MESSAGES = {"not_found": "Elemento non trovato.", "string_too_short": "Inserisci almeno {min_length} caratteri.", ...}
+
+get_message("string_too_short", min_length=3)   # "Inserisci almeno 3 caratteri."
+```
+
+Quando si aggiunge una chiave a `DEFAULT_MESSAGES`, il progetto deve aggiungere il suo testo (il test su
+`missing_messages()` lo segnala).
+
 ### 4.1 `errors` — Eccezioni di dominio e conferme ✅
 
 I service sollevano queste eccezioni senza conoscere HTTP. Le traduce in risposte `api.register_error_handlers`.
 
-| Nome | Status HTTP | Messaggio predefinito | Quando |
+| Nome | Status HTTP | `message_key` (testo inglese) | Quando |
 |---|---|---|---|
-| `DomainError(detail=None, **extra)` | 400 | `Request failed.` | classe base |
-| `NotFound` | 404 | `Not found.` | oggetto inesistente **o non accessibile** all'utente: non si rivela che esiste |
-| `Conflict` | 409 | `Conflict with the current state.` | conflitto con lo stato attuale (valore già usato, oggetto in sola lettura, ...) |
-| `InvalidData` | 422 | `Invalid data.` | violazione di una regola non coperta dalla validazione dello schema |
-| `ConfirmationRequired(impact, required, given, detail=None)` | 428 | `Confirmation required.` | operazione distruttiva non ancora confermata abbastanza volte |
+| `DomainError(detail=None, **extra)` | 400 | `domain_error` (`Request failed.`) | classe base |
+| `NotFound` | 404 | `not_found` (`Not found.`) | oggetto inesistente **o non accessibile** all'utente: non si rivela che esiste |
+| `Conflict` | 409 | `conflict` (`Conflict with the current state.`) | conflitto con lo stato attuale (valore già usato, oggetto in sola lettura, ...) |
+| `InvalidData` | 422 | `invalid_data` (`Invalid data.`) | violazione di una regola non coperta dalla validazione dello schema |
+| `ConfirmationRequired(impact, required, given, detail=None)` | 428 | `confirmation_required` (`Confirmation required.`) | operazione distruttiva non ancora confermata abbastanza volte |
 
-- Ogni eccezione ha `detail` (messaggio per l'utente; se manca, `default_detail` della classe) ed `extra`
+- Ogni eccezione ha `detail` (messaggio per l'utente; se manca, `get_message(message_key)` della classe, quindi
+  il testo di `DJKIT_MESSAGES` se il progetto lo fornisce) ed `extra`
   (dati aggiuntivi per il corpo della risposta; i valori `None` vengono scartati).
   `payload() -> dict` restituisce `{"detail": ..., **extra}`.
 - `InvalidData(detail=None, errors={"campo": ["messaggio", ...]})`: errori legati ai campi.
@@ -121,11 +165,28 @@ require_confirmation(payload.confirmations, 2 if has_money_rows else 1, impact)
 
 ### 4.2 `api` — Integrazione con Django Ninja ✅
 
-- `register_error_handlers(api: NinjaAPI, status_codes: dict | None = None) -> None`: registra un handler per ogni
-  eccezione di `errors` (`DEFAULT_STATUS_CODES`) e per la `ValidationError` di Django (422). Il corpo della
-  risposta è `exc.payload()`. `status_codes` aggiunge o sostituisce degli status, per esempio
-  `{PaymentRequired: 402}` per un'eccezione del progetto. Una sottoclasse non registrata usa lo status della classe
-  registrata più vicina, perché Ninja cerca l'handler lungo l'MRO.
+- `register_error_handlers(api: NinjaAPI, status_codes: dict | None = None) -> None`: registra gli handler
+  degli errori; il corpo della risposta è sempre `ErrorOut` e i testi vengono da `messages`.
+  - Ogni eccezione di `errors` (`DEFAULT_STATUS_CODES`) → `exc.payload()` col suo status. `status_codes` aggiunge
+    o sostituisce degli status, per esempio `{PaymentRequired: 402}` per un'eccezione del progetto. Una
+    sottoclasse non registrata usa lo status della classe registrata più vicina, perché Ninja cerca l'handler
+    lungo l'MRO.
+  - `ValidationError` di Django → 422 di `InvalidData.from_validation_error`.
+  - `ValidationError` di Ninja (validazione degli schemi con Pydantic) → 422 `{detail: invalid_data, errors:
+    validation_errors(...)}`: stesso formato degli altri 422, invece della lista di Pydantic con i messaggi inglesi.
+  - `HttpError` di Ninja → il suo status con `http_error_message(exc)`: `AuthenticationError` 401
+    (`unauthorized`), controllo CSRF fallito della sessione 403 (`csrf_failed`), corpo non leggibile 400
+    (`invalid_json`), `Throttled` 429 (`too_many_requests`), altri status da `HTTP_ERROR_MESSAGE_KEYS`.
+  - `Http404` sollevato dentro un'operazione → 404 `not_found`.
+- `http_error_message(exc) -> str`: messaggio per l'utente di un `HttpError` di Ninja (i messaggi di Ninja,
+  per esempio `"Unauthorized"`, non vengono mai mostrati).
+- `validation_errors(errors: list[dict]) -> dict[str, list[str]]`: errori di Ninja/Pydantic → `{campo: [messaggi]}`.
+  - `error_field(loc) -> str`: nome del campo dalla posizione dell'errore, senza la sorgente e il nome del
+    parametro (`("body", "payload", "email")` → `"email"`, `("query", "usable")` → `"usable"`, annidati con il
+    punto `"items.0.amount"`, nessun campo → `NON_FIELD_ERRORS = "__all__"`).
+  - `validation_message(error) -> str`: messaggio per tipo di errore Pydantic (`VALIDATION_MESSAGE_KEYS`, con i
+    segnaposto presi da `ctx`, per esempio `{min_length}`); per `value_error` (un validatore personalizzato che
+    solleva `ValueError`) il messaggio del validatore stesso; tipi sconosciuti → `invalid_value`.
 - `ErrorOut`: schema `{detail: str, errors?: {campo: [str]}, impact?: dict, required?: int, given?: int}`.
 - `ConfirmationIn`: schema `{confirmations: int = 0}` (≥ 0), il numero di conferme date dal client.
 - `csrf_protected`: decoratore di operazione (`decorate_view(csrf_protect)`) che impone il controllo CSRF di
@@ -149,6 +210,27 @@ def csrf(request):
 def login(request, payload: LoginIn): ...
 ```
 
+### 4.2a `views` — Viste d'errore di Django in JSON ✅
+
+Alcuni errori Django li risponde fuori da qualunque API, con pagine HTML non sempre nella lingua dell'utente: il
+controllo CSRF fallito di `csrf_protect` (per esempio `api.csrf_protected`) e, con `DEBUG` spento, le pagine 400,
+403, 404 e 500. Queste viste rispondono invece `{"detail": messaggio}` con i testi di `messages`.
+
+- `csrf_failure(request, reason="")` → 403 `csrf_failed` (per `CSRF_FAILURE_VIEW`; `reason` è il motivo tecnico,
+  non mostrato).
+- `bad_request` → 400 `bad_request`; `permission_denied` → 403 `forbidden`; `page_not_found` → 404 `not_found`;
+  `server_error` → 500 `server_error` (per `handler400`/`handler403`/`handler404`/`handler500`).
+- `error_response(key, status) -> JsonResponse`: la risposta comune.
+
+```python
+# settings.py
+CSRF_FAILURE_VIEW = "djkit.views.csrf_failure"
+# urls.py (URLconf principale)
+handler404 = "djkit.views.page_not_found"   # e così handler400, handler403, handler500
+```
+
+Con `DEBUG` attivo Django continua a mostrare le sue pagine tecniche di 404 e 500.
+
 ### 4.2b `auth` — Password e login a sessione ✅
 
 Funzionano con qualunque modello utente (usano solo `django.contrib.auth`).
@@ -158,8 +240,21 @@ Funzionano con qualunque modello utente (usano solo `django.contrib.auth`).
   `user` (anche non ancora salvato) permette ai validatori di confrontare la password con i dati dell'utente.
 - `login_with_password(request, username: str, password: str, detail: str | None = None) -> user`:
   `authenticate()` + `login()` (imposta il cookie di sessione). Credenziali errate o utente non attivo →
-  `InvalidData` con lo stesso messaggio (`detail`, oppure `DEFAULT_LOGIN_FAILED_DETAIL = "Invalid credentials."`),
-  così non si rivela se l'account esiste. `username` è il valore di `USERNAME_FIELD`, già normalizzato dal chiamante.
+  `InvalidData` con lo stesso messaggio (`detail`, oppure la chiave `login_failed`), così non si rivela se
+  l'account esiste. `username` è il valore di `USERNAME_FIELD`, già normalizzato dal chiamante.
+- `MinimumLengthValidator` e `UserAttributeSimilarityValidator`: sostituti dei validatori di Django con le stesse
+  regole e opzioni, ma con i messaggi di `messages` (`password_too_short` con `{min_length}`,
+  `password_too_similar`). Servono perché la versione di Django del primo può restare non tradotta (forma
+  plurale) e il secondo inserisce nel testo il `verbose_name` del campo dell'utente, spesso in un'altra lingua.
+
+```python
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "djkit.auth.UserAttributeSimilarityValidator"},
+    {"NAME": "djkit.auth.MinimumLengthValidator", "OPTIONS": {"min_length": 8}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+```
 
 ```python
 user = login_with_password(request, normalize_email_address(payload.email), payload.password)
@@ -218,7 +313,7 @@ log_write(AuditLogEntry, request.user, AuditAction.UPDATE, invoice, changes, tea
 
 - `apply_patch(obj, data: dict, allowed: set[str] | None = None) -> dict`:
   1. Controlla i campi. Un campo inesistente, non concreto, la chiave primaria o un campo fuori da `allowed`
-     sollevano `InvalidData(errors={campo: [...]})`.
+     sollevano `InvalidData(errors={campo: [messaggio della chiave field_not_editable]})`.
   2. Assegna a `obj` solo i campi in `data`, cioè `payload.dict(exclude_unset=True)`. Per una foreign key
      il valore può essere l'istanza o la sua chiave.
   3. Esegue `full_clean()`, che controlla validatori, choices, unicità e `clean()` del modello. Un errore
@@ -270,8 +365,8 @@ Invoice.objects.accessible_by(request.user)
 - `ensure_unique(model, values: dict, exclude_pk=None, messages: dict | None = None) -> None`: controlla ogni campo
   di `values` (già normalizzato; i `None` sono saltati) e, se un'altra riga usa già quel valore, solleva
   `Conflict(errors={campo: [messaggio]})` con tutti i campi occupati; `detail` unisce i messaggi distinti.
-  `exclude_pk` esclude la riga in modifica; `messages` sostituisce `DEFAULT_UNIQUE_MESSAGE`
-  (`"This value is already used."`). Si chiama prima di salvare, per rispondere 409 invece di 422.
+  `exclude_pk` esclude la riga in modifica; `messages` (`{campo: testo}`) sostituisce, per i campi indicati, il
+  messaggio generico della chiave `unique`. Si chiama prima di salvare, per rispondere 409 invece di 422.
 
 ```python
 ensure_unique(Customer, {"email": email, "vat_number": vat}, exclude_pk=customer.pk)

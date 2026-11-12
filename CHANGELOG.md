@@ -13,6 +13,28 @@ All notable changes to djkit. Versions follow semantic versioning
   with per-field errors), `DEFAULT_UNIQUE_MESSAGE`.
 - `api`: `csrf_protected` and `sets_csrf_cookie` operation decorators for
   public (`auth=None`) endpoints of a session-based API.
+- `messages` (new module): every user-facing message has a key and an
+  English default (`DEFAULT_MESSAGES`); projects give their own texts with
+  the `DJKIT_MESSAGES` setting. `get_message`, `missing_messages`,
+  `configured_messages`.
+- `views` (new module): JSON error views `csrf_failure` (for
+  `CSRF_FAILURE_VIEW`), `bad_request`, `permission_denied`,
+  `page_not_found`, `server_error` (for `handler400`...`handler500`).
+- `api.register_error_handlers` also converts Django Ninja's own errors:
+  schema `ValidationError` -> 422 `ErrorOut` with per-field messages
+  (`validation_errors`, `error_field`, `validation_message`), `HttpError`
+  (401, 403 CSRF, 400 unparsable body, 429, ...) and `Http404`, all with
+  `messages` texts (`http_error_message`).
+- `auth`: `MinimumLengthValidator` and `UserAttributeSimilarityValidator`,
+  Django's password validators with `messages` texts.
+
+### Changed
+- `errors`: the default detail of each exception comes from its
+  `message_key` (djkit.messages) instead of the `default_detail` class
+  attribute, which is removed.
+- `db.ensure_unique`, `updates.apply_patch` and `auth.login_with_password`
+  take their default texts from `messages`; the constants
+  `DEFAULT_UNIQUE_MESSAGE` and `DEFAULT_LOGIN_FAILED_DETAIL` are removed.
 
 ## [0.1.0] — unreleased
 

@@ -15,12 +15,13 @@ from unittest import mock
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import OuterRef, Q
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 
-from djkit.db import DEFAULT_UNIQUE_MESSAGE, AccessibleQuerySet, count_subquery, date_filter, ensure_unique, sum_subquery
+from djkit.db import AccessibleQuerySet, count_subquery, date_filter, ensure_unique, sum_subquery
 from djkit.errors import Conflict
 
 
+@override_settings(DJKIT_MESSAGES={})
 class EnsureUniqueTests(TestCase):
     """ensure_unique raises Conflict for values already used by other rows."""
 
@@ -34,11 +35,11 @@ class EnsureUniqueTests(TestCase):
         ensure_unique(Group, {"name": "support"})
 
     def test_used_value_raises_conflict_on_its_field(self):
-        """name 'sales' -> Conflict with errors {'name': [default message]}."""
+        """name 'sales' -> Conflict with errors {'name': ['This value is already used.']}."""
         with self.assertRaises(Conflict) as caught:
             ensure_unique(Group, {"name": "sales"})
-        self.assertEqual(caught.exception.extra["errors"], {"name": [DEFAULT_UNIQUE_MESSAGE]})
-        self.assertEqual(caught.exception.detail, DEFAULT_UNIQUE_MESSAGE)
+        self.assertEqual(caught.exception.extra["errors"], {"name": ["This value is already used."]})
+        self.assertEqual(caught.exception.detail, "This value is already used.")
 
     def test_row_being_updated_may_keep_its_value(self):
         """name 'staff' with exclude_pk of 'staff' -> no error; of another row -> Conflict."""

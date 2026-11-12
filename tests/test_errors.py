@@ -5,11 +5,12 @@ Run with: python manage.py test djkit.tests.test_errors
 """
 
 from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from djkit.errors import Conflict, ConfirmationRequired, InvalidData, NotFound, require_confirmation
 
 
+@override_settings(DJKIT_MESSAGES={})
 class DomainErrorTests(SimpleTestCase):
     """Domain exceptions carry a message and extra data for the response body."""
 
@@ -17,6 +18,11 @@ class DomainErrorTests(SimpleTestCase):
         """NotFound() -> 'Not found.'; Conflict('Taken') -> 'Taken'."""
         self.assertEqual(NotFound().payload(), {"detail": "Not found."})
         self.assertEqual(Conflict("Taken").payload(), {"detail": "Taken"})
+
+    @override_settings(DJKIT_MESSAGES={"not_found": "Introuvable."})
+    def test_default_detail_follows_djkit_messages(self):
+        """DJKIT_MESSAGES {'not_found': 'Introuvable.'} -> NotFound() detail 'Introuvable.'."""
+        self.assertEqual(NotFound().detail, "Introuvable.")
 
     def test_extra_data_in_payload_and_none_dropped(self):
         """errors are kept, None values are dropped."""
@@ -48,6 +54,7 @@ class RequireConfirmationTests(SimpleTestCase):
         require_confirmation(3, 2, {})
 
 
+@override_settings(DJKIT_MESSAGES={})
 class FromValidationErrorTests(SimpleTestCase):
     """InvalidData.from_validation_error keeps Django's messages."""
 

@@ -21,9 +21,7 @@ from django.db.models import DecimalField, F, Func, IntegerField, Q, Subquery, V
 from django.db.models.functions import Coalesce
 
 from .errors import Conflict
-
-# Message of ensure_unique for a field without a custom message.
-DEFAULT_UNIQUE_MESSAGE = "This value is already used."
+from .messages import get_message
 
 
 def ensure_unique(model: type[models.Model], values: dict, exclude_pk=None, messages: dict | None = None) -> None:
@@ -39,8 +37,8 @@ def ensure_unique(model: type[models.Model], values: dict, exclude_pk=None, mess
             saved; None values are skipped.
         exclude_pk: primary key of the row being updated, which may keep
             its own values; None when creating.
-        messages: optional {field name: message} replacing
-            DEFAULT_UNIQUE_MESSAGE.
+        messages: optional {field name: message} replacing the generic
+            "unique" message of djkit.messages.
 
     Raises:
         Conflict: errors={field: [message]} for every value already used;
@@ -51,7 +49,7 @@ def ensure_unique(model: type[models.Model], values: dict, exclude_pk=None, mess
     if exclude_pk is not None:
         others = others.exclude(pk=exclude_pk)
     taken = {
-        field: [messages.get(field, DEFAULT_UNIQUE_MESSAGE)]
+        field: [messages[field] if field in messages else get_message("unique")]
         for field, value in values.items()
         if value is not None and others.filter(**{field: value}).exists()
     }

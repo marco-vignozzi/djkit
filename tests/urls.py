@@ -7,8 +7,9 @@ each endpoint raises one kind of error or echoes the request.
 """
 
 from django.core.exceptions import ValidationError
+from django.http import Http404
 from django.urls import path
-from ninja import NinjaAPI, Schema
+from ninja import Field, NinjaAPI, Schema
 from ninja.security import django_auth
 
 from djkit.api import ConfirmationIn, csrf_protected, register_error_handlers, sets_csrf_cookie
@@ -26,6 +27,13 @@ class NameIn(Schema):
     name: str
 
 
+class PersonIn(Schema):
+    """Body of the schema-validation endpoint."""
+
+    name: str = Field(..., min_length=2)
+    age: int = Field(..., ge=0)
+
+
 class CredentialsIn(Schema):
     """Body of the test login endpoint."""
 
@@ -33,7 +41,7 @@ class CredentialsIn(Schema):
     password: str
 
 
-api =NinjaAPI(urls_namespace="djkit-tests", auth=django_auth)
+api = NinjaAPI(urls_namespace="djkit-tests", auth=django_auth)
 register_error_handlers(api, {PaymentRequired: 402})
 
 
@@ -100,6 +108,18 @@ def login(request, payload: CredentialsIn):
     """Public login with login_with_password: returns the user's pk (422 on wrong credentials)."""
     user = login_with_password(request, payload.username, payload.password)
     return {"user": user.pk}
+
+
+@api.post("/public/person", auth=None, response={200: dict})
+def person(request, payload: PersonIn):
+    """Public: schema validation only (422 from Ninja/Pydantic on bad input)."""
+    return {"name": payload.name, "age": payload.age}
+
+
+@api.get("/public/http404", auth=None)
+def http404(request):
+    """Public: Django's Http404 raised inside an operation."""
+    raise Http404("Technical message never shown.")
 
 
 urlpatterns = [path("api/", api.urls)]
