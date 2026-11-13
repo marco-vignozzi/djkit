@@ -2,6 +2,9 @@
 Django Ninja integration.
 
     - ErrorOut: body of every error response produced by the handlers.
+    - InputSchema: base of request bodies; a field the schema does not
+      declare is rejected (422 "unknown_field") instead of being silently
+      ignored, so a client that sends a wrong or misspelled field finds out.
     - ConfirmationIn: body of destructive requests (number of confirmations).
     - register_error_handlers(api): maps the djkit.errors exceptions, Django's
       ValidationError and the errors produced by Django Ninja itself (401,
@@ -33,6 +36,7 @@ from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from ninja import Field, NinjaAPI, Schema
 from ninja import errors as ninja_errors
 from ninja.decorators import decorate_view
+from pydantic import ConfigDict
 
 from .errors import Conflict, ConfirmationRequired, DomainError, InvalidData, NotFound
 from .messages import get_message
@@ -109,6 +113,7 @@ VALIDATION_MESSAGE_KEYS: dict[str, str] = {
     "dict_type": "object_type",
     "model_type": "object_type",
     "model_attributes_type": "object_type",
+    "extra_forbidden": "unknown_field",
 }
 
 # First items of a Ninja error location that name where the value came from;
@@ -151,7 +156,21 @@ class ErrorOut(Schema):
     given: int | None = None
 
 
-class ConfirmationIn(Schema):
+class InputSchema(Schema):
+    """
+    Base class of request body schemas: fields not declared by the schema
+    are rejected with a 422 on that field (message key "unknown_field"),
+    e.g. {"pasword": "..."} or a field that cannot be changed through this
+    endpoint. Without it Pydantic would drop them silently and the client
+    would believe the value was accepted.
+
+    Response schemas keep inheriting ninja.Schema.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ConfirmationIn(InputSchema):
     """
     Body of a destructive request (e.g. DELETE).
 

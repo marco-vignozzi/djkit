@@ -11,7 +11,11 @@ Audit log: who changed what, and when.
       transaction as the write, so the log and the data never diverge.
 
 Fields listed in the DJKIT_AUDIT_EXCLUDED_FIELDS setting (default
-{"password"}) never appear in snapshots or diffs.
+{"password"}) never appear in snapshots or diffs. Fields listed in
+DJKIT_AUDIT_MASKED_FIELDS (default: none; e.g. personal data such as
+"email" or "phone") appear in the log, but log_write stores their values
+as the "audit_masked" message: the entry still says that the field was
+set or changed, never its value.
 """
 
 import datetime
@@ -22,9 +26,13 @@ from django.conf import settings
 from django.db import models
 
 from .fields import choice_field, choices_constraint
+from .messages import get_message
 
 # Fields never written to the log (secrets), unless the setting overrides it.
 DEFAULT_EXCLUDED_FIELDS = frozenset({"password"})
+
+# Fields whose values are masked in the log, unless the setting overrides it.
+DEFAULT_MASKED_FIELDS = frozenset()
 
 
 class AuditAction(models.TextChoices):
@@ -109,6 +117,57 @@ def excluded_fields() -> frozenset[str]:
         settings.DJKIT_AUDIT_EXCLUDED_FIELDS, or DEFAULT_EXCLUDED_FIELDS.
     """
     return frozenset(getattr(settings, "DJKIT_AUDIT_EXCLUDED_FIELDS", DEFAULT_EXCLUDED_FIELDS))
+
+
+def masked_fields() -> frozenset[str]:
+    """
+    Field names whose values are masked in the log.
+
+    Returns:
+        settings.DJKIT_AUDIT_MASKED_FIELDS, or DEFAULT_MASKED_FIELDS. Names
+        are matched in every model (e.g. "email" masks the email of every
+        model that has one).
+    """
+    return frozenset(getattr(settings, "DJKIT_AUDIT_MASKED_FIELDS", DEFAULT_MASKED_FIELDS))
+
+
+def mask_value(value):
+    """
+    Masked form of one value of a masked field.
+
+    Args:
+        value: the value (already JSON-serializable or not).
+
+    Returns:
+        The value unchanged when empty (None or ""), so the log still shows
+        that the field was empty; otherwise the "audit_masked" message.
+    """
+    return value if value in (None, "") else get_message("audit_masked")
+
+
+def mask_changes(changes: dict) -> dict:
+    """
+    Mask the values of the masked fields in a snapshot or a diff.
+
+    Args:
+        changes: {field: value} (snapshot) or {field: [old, new]} (diff);
+            other keys (e.g. extra information added by the caller) are
+            kept as they are.
+
+    Returns:
+        A new dict where every masked field has its value (or both values
+        of a diff pair) replaced by mask_value.
+    """
+    masked = masked_fields()
+    result = {}
+    for key, value in changes.items():
+        if key not in masked:
+            result[key] = value
+        elif isinstance(value, (list, tuple)):
+            result[key] = [mask_value(item) for item in value]
+        else:
+            result[key] = mask_value(value)
+    return result
 
 
 def to_json_value(value):
@@ -196,7 +255,10 @@ def log_write(
     Record one write operation.
 
     Call it inside the same transaction as the write. For DELETE call it
-    before obj.delete(), while obj.pk is still set.
+    before obj.delete(), while obj.pk is still set. The values of the
+    masked fields (DJKIT_AUDIT_MASKED_FIELDS) are masked here, so callers
+    pass real snapshots and diffs (a diff computed on masked values would
+    miss the changes).
 
     Args:
         entry_model: the project's concrete subclass of AuditEntryBase.
@@ -206,7 +268,8 @@ def log_write(
         obj: the created, updated or deleted instance.
         changes: what to store; when None, the full snapshot for CREATE and
             DELETE and {} for UPDATE (for updates pass diff(before, after),
-            e.g. the value returned by djkit.updates.apply_patch).
+            e.g. the value returned by djkit.updates.apply_patch). Masked
+            fields are masked before saving.
         **context: values of the extra fields of entry_model.
 
     Returns:
@@ -221,6 +284,6 @@ def log_write(
         model=type(obj).__name__,
         object_id=obj.pk,
         object_label=str(obj)[:label_length],
-        changes=to_json_value(changes),
+        changes=to_json_value(mask_changes(changes)),
         **context,
     )

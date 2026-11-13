@@ -53,8 +53,8 @@ djkit/
 ├── errors.py            # eccezioni di dominio e conferme
 ├── api.py               # handler HTTP delle eccezioni (anche di Ninja/Pydantic), schemi comuni, decoratori CSRF
 ├── views.py             # viste d'errore di Django in JSON (CSRF, 400, 403, 404, 500)
-├── auth.py              # validazione password, login a sessione, validatori password
-├── audit.py             # registro delle operazioni (modello astratto + log_write)
+├── auth.py              # validazione password, login a sessione, validatori password, link di cambio password
+├── audit.py             # registro delle operazioni (modello astratto + log_write, campi mascherati)
 ├── updates.py           # modifica parziale di un oggetto
 ├── fields.py            # campi a scelta, importi, vincoli CHECK
 ├── access.py            # lettura di un oggetto accessibile all'utente, o 404
@@ -62,7 +62,8 @@ djkit/
 ├── dates.py             # date mensili e scadenze
 ├── validators.py        # normalizzazione di dati personali generici
 ├── it.py                # dati italiani: codice fiscale
-├── mail.py              # invio email con modalità demo
+├── mail.py              # invio email (testi da template) con modalità demo
+├── numbers.py           # divisione di un totale in parti uguali
 ├── testing/
 │   ├── runner.py        # VerboseTestRunner: output leggibile dei test
 │   └── api.py           # helper per i test delle API
@@ -70,7 +71,7 @@ djkit/
 ```
 
 Dipendenze interne: `errors` → `messages`; `api` → `errors`, `messages`; `views` → `messages`;
-`access` → `errors`; `auth` → `errors`, `messages`; `db` → `errors`, `messages`; `audit` → `fields`;
+`access` → `errors`; `auth` → `errors`, `messages`; `db` → `errors`, `messages`; `audit` → `fields`, `messages`;
 `updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`). Tutti gli altri moduli sono indipendenti tra loro.
 
 `djkit` non ha un modulo `models`: i modelli astratti (`audit.AuditEntryBase`) si importano dal loro modulo e
@@ -92,8 +93,12 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 | `DJKIT_TEST_EXCLUDED_FILES` | `{"tests.py", "factories.py", "apps.py", "admin.py", "__init__.py"}` | `testing.runner` | nomi di file mai mostrati come "codice sotto test"; il valore **sostituisce** il default | ✅ |
 | `DJKIT_TEST_PASSWORD_HASHERS` | `("django.contrib.auth.hashers.MD5PasswordHasher",)` | `testing.runner` | `PASSWORD_HASHERS` usati **solo durante i test**, al posto di quelli del progetto (lenti apposta: PBKDF2 impiega circa 0,5 s per hash). `None` lascia quelli del progetto | ✅ |
 | `DJKIT_AUDIT_EXCLUDED_FIELDS` | `{"password"}` | `audit`, `updates` | campi mai scritti nel registro (né nelle `snapshot`, né nei `diff`); il valore **sostituisce** il default | ✅ |
+| `DJKIT_AUDIT_MASKED_FIELDS` | `frozenset()` | `audit` | campi scritti nel registro con il valore **mascherato** (testo della chiave `audit_masked`; un valore vuoto resta vuoto): si vede che il campo è stato impostato o cambiato, mai il valore. Vale per i campi con quel nome in **ogni** modello (es. dati personali: `{"email", "phone"}`) | ✅ |
 | `DJKIT_MESSAGES` | `{}` | `messages` (e quindi `errors`, `api`, `views`, `auth`, `db`, `updates`) | testi dei messaggi per l'utente, `{chiave: testo}`; le chiavi assenti restano col testo inglese di `DEFAULT_MESSAGES`. Un progetto in un'altra lingua le fornisce **tutte** (vedi §4.0) | ✅ |
-| `DJKIT_DEMO_MODE` | `False` | `mail` | se vero le email non partono e vengono solo registrate nel log (il progetto può passarlo anche come parametro) | 📝 |
+| `DJKIT_MAIL_DEMO_MODE` | `False` | `mail` | se vero `send_email` non invia e registra nel log destinatari e oggetto (istanze dimostrative) | ✅ |
+
+Setting di Django usati: `EMAIL_BACKEND`, `DEFAULT_FROM_EMAIL` (`mail`); `PASSWORD_RESET_TIMEOUT` (`auth`, validità dei
+link di cambio password, in secondi).
 
 `BASE_DIR` (setting standard dei progetti Django) è usato da `testing.runner` per decidere quali file appartengono
 al progetto.
@@ -112,14 +117,15 @@ di `djkit` resta in inglese, ma nessun messaggio inglese arriva all'utente.
 - `DEFAULT_MESSAGES: dict[str, str]`: chiave → testo inglese. Gruppi di chiavi:
   - eccezioni: `domain_error`, `not_found`, `conflict`, `invalid_data`, `confirmation_required`;
   - `db`/`updates`: `unique`, `field_not_editable`, `deleted_read_only`;
-  - `auth`: `login_failed`, `password_too_short` (`{min_length}`), `password_too_similar`;
+  - `audit`: `audit_masked` (valore di un campo mascherato);
+  - `auth`: `login_failed`, `password_too_short` (`{min_length}`), `password_too_similar`, `password_reset_invalid`;
   - errori HTTP: `bad_request`, `unauthorized`, `forbidden`, `csrf_failed`, `method_not_allowed`,
     `too_many_requests`, `server_error`;
   - validazione degli schemi: `missing`, `invalid_value`, `invalid_json`, `string_type`, `string_too_short`
     (`{min_length}`), `string_too_long` (`{max_length}`), `number_type`, `boolean_type`, `date_type`,
     `datetime_type`, `greater_than` (`{gt}`), `greater_than_equal` (`{ge}`), `less_than` (`{lt}`),
     `less_than_equal` (`{le}`), `max_digits` (`{max_digits}`), `decimal_places` (`{decimal_places}`), `choice`,
-    `list_type`, `object_type`.
+    `list_type`, `object_type`, `unknown_field` (campo non dichiarato dallo schema, vedi `InputSchema`).
 - `get_message(key: str, **params) -> str`: testo del progetto (`DJKIT_MESSAGES`) o quello inglese, con i
   segnaposto `{nome}` riempiti (`str.format`); se manca il valore di un segnaposto restituisce il testo così com'è.
   Chiave sconosciuta → `KeyError`. Accetta anche chiavi definite solo dal progetto in `DJKIT_MESSAGES`.
@@ -189,7 +195,12 @@ require_confirmation(payload.confirmations, 2 if has_money_rows else 1, impact)
     segnaposto presi da `ctx`, per esempio `{min_length}`); per `value_error` (un validatore personalizzato che
     solleva `ValueError`) il messaggio del validatore stesso; tipi sconosciuti → `invalid_value`.
 - `ErrorOut`: schema `{detail: str, errors?: {campo: [str]}, impact?: dict, required?: int, given?: int}`.
-- `ConfirmationIn`: schema `{confirmations: int = 0}` (≥ 0), il numero di conferme date dal client.
+- `InputSchema`: base degli schemi dei **corpi delle richieste** (`model_config = ConfigDict(extra="forbid")`). Un
+  campo che lo schema non dichiara risponde 422 su quel campo con la chiave `unknown_field` (anche dentro un elenco:
+  `"0.role"`), invece di essere scartato in silenzio: un client che sbaglia il nome di un campo, o manda un campo che
+  quell'endpoint non modifica, se ne accorge subito. Gli schemi delle risposte restano `ninja.Schema`.
+- `ConfirmationIn` (un `InputSchema`): schema `{confirmations: int = 0}` (≥ 0), il numero di conferme date dal client.
+  `{"confirmation": 2}` (errore di battitura) → 422, non un 428 con 0 conferme.
 - `csrf_protected`: decoratore di operazione (`decorate_view(csrf_protect)`) che impone il controllo CSRF di
   Django. Serve sugli endpoint pubblici con `auth=None` che modificano lo stato (login, registrazione): Ninja
   controlla il token CSRF solo dentro l'autenticazione a sessione (`django_auth`), quindi senza il decoratore
@@ -261,6 +272,29 @@ AUTH_PASSWORD_VALIDATORS = [
 user = login_with_password(request, normalize_email_address(payload.email), payload.password)
 ```
 
+Cambio password con un link inviato per email (password dimenticata, o un utente che la vuole cambiare). Usano
+`default_token_generator` di Django: il token dipende dall'hash della password, dall'ultimo login e dall'email,
+quindi vale **una volta sola** (cambiata la password non funziona più) e per `PASSWORD_RESET_TIMEOUT` secondi.
+
+- `password_reset_token(user) -> tuple[str, str]`: `(uid, token)`, la chiave dell'utente in base64 per URL e il token.
+  Il progetto li mette nel link che invia.
+- `user_for_password_reset(uid: str, token: str, detail: str | None = None) -> user`: l'utente del link, attivo e
+  con il token valido. Altrimenti (uid malformato, utente inesistente o non attivo, token sbagliato, scaduto o già
+  usato) `InvalidData` sempre con lo stesso messaggio (`detail`, oppure la chiave `password_reset_invalid`).
+- `reset_password(uid, token, new_password, field="new_password", detail=None) -> user`: controlla il link, applica
+  i validatori (errori su `field`), salva la nuova password. Le sessioni aperte prima smettono di funzionare (Django
+  confronta l'hash della sessione a ogni richiesta).
+
+```python
+uid, token = password_reset_token(user)
+link = f"{settings.FRONTEND_RESET_URL}?{urlencode({'uid': uid, 'token': token})}"
+...
+reset_password(payload.uid, payload.token, payload.new_password)   # dalla pagina del link
+```
+
+Chi chiede il link dovrebbe ricevere sempre la stessa risposta, registrato o no, per non rivelare quali email hanno
+un account: è compito del progetto.
+
 ### 4.3 `audit` — Registro delle operazioni ✅
 
 - `AuditAction`: valori ammessi di `action` (`CREATE`, `UPDATE`, `DELETE`).
@@ -305,6 +339,11 @@ log_write(AuditLogEntry, request.user, AuditAction.UPDATE, invoice, changes, tea
   - `fields` limita il risultato a dei nomi (accetta sia il nome sia l'attname).
 - `diff(before, after) -> dict`: `{"campo": [vecchio, nuovo]}` per le sole chiavi cambiate. Una chiave assente
   da un lato conta come `None`.
+- `mask_changes(changes: dict) -> dict`: copia di una `snapshot` o di un `diff` con i valori dei campi di
+  `DJKIT_AUDIT_MASKED_FIELDS` sostituiti dal testo della chiave `audit_masked` (in un `diff`, entrambi i valori).
+  Un valore vuoto (`None` o `""`) resta com'è. Le altre chiavi restano invariate. `log_write` la applica sempre:
+  i chiamanti passano `snapshot` e `diff` veri (un `diff` calcolato su valori già mascherati perderebbe le modifiche).
+- `mask_value(value)`: il valore mascherato di un campo (vuoto → invariato). `masked_fields()`: il setting.
 - `to_json_value(value)`: converte un valore in uno serializzabile in JSON.
   - `Decimal` → stringa, così non si perde precisione.
   - Date e orari → ISO; `UUID` → stringa; istanza di un modello → la sua chiave.
@@ -447,11 +486,38 @@ Funzioni pure, senza database.
   (codice `invalid_tax_code`).
 - `it.normalize_tax_code(value: str | None) -> str | None`: toglie gli spazi e converte in maiuscolo.
 
-### 4.9 `mail` — Invio email 📝
+### 4.9 `mail` — Invio email ✅
 
-- `send_email(subject, body, to: list[str], *, reply_to: list[str] | None = None, demo_mode: bool | None = None) -> bool`:
-  invia con `django.core.mail.EmailMessage`. Con la modalità demo attiva (parametro, oppure `DJKIT_DEMO_MODE`)
-  l'email non parte e viene solo registrata nel log. Restituisce `True` se l'email è stata inviata.
+Nessuna libreria esterna: usa `django.core.mail`. Il server lo sceglie `EMAIL_BACKEND` di Django (per esempio console
+in sviluppo, SMTP in produzione; nei test Django usa la memoria e le email finiscono in `mail.outbox`).
+
+- `render_email(template_name: str, context: dict) -> tuple[str, str]`: `(oggetto, testo)` dai template
+  `"<template_name>_subject.txt"` e `"<template_name>_body.txt"`, così i testi (e la loro lingua) stanno nel progetto.
+  L'oggetto viene ridotto a una riga. I template sono testo semplice: per non trasformare `&` in `&amp;` (es. nei
+  link) il testo va racchiuso in `{% autoescape off %}…{% endautoescape %}`.
+- `send_email(to: list[str], subject: str, body: str, *, reply_to: list[str] | None = None, from_email: str | None = None) -> bool`:
+  invia un'email di testo con `EmailMessage` (mittente `DEFAULT_FROM_EMAIL` se `from_email` manca). `True` se
+  l'email è stata consegnata al backend, `False` in modalità demo (`DJKIT_MAIL_DEMO_MODE`: l'email viene solo
+  registrata nel log, con destinatari e oggetto). Gli errori del server **non** vengono nascosti
+  (`fail_silently=False`): arrivano al chiamante, che decide cosa mostrare all'utente.
+- `demo_mode() -> bool`: il setting `DJKIT_MAIL_DEMO_MODE`.
+- `ReadableConsoleBackend`: backend email per lo sviluppo (`EMAIL_BACKEND = "djkit.mail.ReadableConsoleBackend"`).
+  Stampa nel terminale `From`, `To`, `Cc`, `Reply-To`, `Subject` e il testo **così com'è scritto**. Il backend console
+  di Django stampa invece il messaggio codificato: con lettere accentate il testo diventa quoted-printable e nei link
+  compaiono `=3D` e righe spezzate, che non si possono copiare.
+
+```python
+subject, body = render_email("shop/emails/welcome", {"user": user})
+send_email([user.email], subject, body, reply_to=[shop.owner_email])
+```
+
+### 4.9b `numbers` — Numeri ✅
+
+- `split_evenly(total: Decimal, parts: int, step: Decimal = CENT) -> list[Decimal]`: divide `total` in `parts` parti
+  uguali arrotondate per difetto a `step` (default `Decimal("0.01")`); gli `step` che avanzano vanno uno ciascuno alle
+  **prime** parti, così la somma è sempre esattamente `total` e chi riceve i centesimi lo decide il chiamante
+  ordinando i propri elementi. Esempio: 100 in 3 → `[33.34, 33.33, 33.33]`. `parts < 1` o `total` non multiplo di
+  `step` → `ValueError`.
 
 ### 4.10 `testing.runner` — Output leggibile dei test ✅
 

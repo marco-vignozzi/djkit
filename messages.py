@@ -32,8 +32,11 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "field_not_editable": "This field cannot be changed.",
     # db.ensure_not_deleted
     "deleted_read_only": "This item has been deleted: it can only be consulted.",
+    # audit: value of a masked field (DJKIT_AUDIT_MASKED_FIELDS)
+    "audit_masked": "[hidden]",
     # auth
     "login_failed": "Invalid credentials.",
+    "password_reset_invalid": "The password reset link is invalid or has expired: request a new one.",
     "password_too_short": "This password is too short: it must contain at least {min_length} characters.",
     "password_too_similar": "This password is too similar to your personal data.",
     # HTTP errors raised by the framework or by Django Ninja (api, views)
@@ -63,6 +66,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "decimal_places": "Enter at most {decimal_places} decimal places.",
     "choice": "Value not allowed.",
     "list_type": "Enter a list of values.",
+    "unknown_field": "This field is not accepted.",
     "object_type": "Enter an object.",
 }
 

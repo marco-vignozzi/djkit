@@ -12,7 +12,7 @@ from django.urls import path
 from ninja import Field, NinjaAPI, Schema
 from ninja.security import django_auth
 
-from djkit.api import ConfirmationIn, csrf_protected, register_error_handlers, sets_csrf_cookie
+from djkit.api import ConfirmationIn, InputSchema, csrf_protected, register_error_handlers, sets_csrf_cookie
 from djkit.auth import login_with_password
 from djkit.errors import Conflict, DomainError, InvalidData, NotFound, require_confirmation
 
@@ -27,7 +27,7 @@ class NameIn(Schema):
     name: str
 
 
-class PersonIn(Schema):
+class PersonIn(InputSchema):
     """Body of the schema-validation endpoint."""
 
     name: str = Field(..., min_length=2)

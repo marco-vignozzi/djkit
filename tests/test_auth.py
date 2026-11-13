@@ -7,10 +7,21 @@ djkit/tests/urls.py, so the session cookie is really set.
 Run with: python manage.py test djkit.tests.test_auth
 """
 
-from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase, override_settings
+from datetime import datetime, timedelta
+from unittest import mock
 
-from djkit.auth import MinimumLengthValidator, UserAttributeSimilarityValidator, validate_new_password
+from django.core.exceptions import ValidationError
+from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils.http import urlsafe_base64_encode
+
+from djkit.auth import (
+    MinimumLengthValidator,
+    UserAttributeSimilarityValidator,
+    password_reset_token,
+    reset_password,
+    user_for_password_reset,
+    validate_new_password,
+)
 from djkit.errors import InvalidData
 from djkit.testing.api import ApiTestCase, make_user
 
@@ -113,3 +124,67 @@ class PasswordValidatorTests(ApiTestCase):
     def test_similarity_accepts_unrelated_password(self):
         """'Zebra-Quartz-77' vs a generated user -> no error."""
         UserAttributeSimilarityValidator().validate("Zebra-Quartz-77", make_user())
+
+
+@override_settings(AUTH_PASSWORD_VALIDATORS=MIN_LENGTH_VALIDATORS, DJKIT_MESSAGES={}, PASSWORD_RESET_TIMEOUT=3600)
+class PasswordResetTests(TestCase):
+    """password_reset_token / user_for_password_reset / reset_password: a link valid once, for a limited time."""
+
+    # Message of every invalid link (English default of djkit).
+    INVALID = "The password reset link is invalid or has expired: request a new one."
+
+    def setUp(self):
+        """One active user with a known password and a fresh link."""
+        self.user = make_user(password="Old-pass-123")
+        self.uid, self.token = password_reset_token(self.user)
+
+    def assertInvalidLink(self, uid, token):
+        """The link is rejected with the generic message and no field errors."""
+        with self.assertRaises(InvalidData) as caught:
+            user_for_password_reset(uid, token)
+        self.assertEqual(caught.exception.payload(), {"detail": self.INVALID})
+
+    def test_valid_link_sets_the_new_password(self):
+        """Right uid and token -> the user; reset_password -> new password works, old one no longer."""
+        self.assertEqual(user_for_password_reset(self.uid, self.token), self.user)
+        reset_password(self.uid, self.token, "New-pass-456")
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("New-pass-456"))
+        self.assertFalse(self.user.check_password("Old-pass-123"))
+
+    def test_link_works_only_once(self):
+        """After a reset the same link is invalid (the token depends on the password)."""
+        reset_password(self.uid, self.token, "New-pass-456")
+        self.assertInvalidLink(self.uid, self.token)
+
+    def test_expired_link(self):
+        """Token checked 2 hours later with a validity of 1 hour -> invalid."""
+        later = datetime.now() + timedelta(hours=2)
+        with mock.patch("django.contrib.auth.tokens.PasswordResetTokenGenerator._now", return_value=later):
+            self.assertInvalidLink(self.uid, self.token)
+
+    def test_wrong_token_malformed_or_unknown_uid(self):
+        """Wrong token, uid not base64, uid of no user -> same generic error."""
+        for uid, token in [
+            (self.uid, "wrong-token"),
+            ("!!not-base64!!", self.token),
+            (urlsafe_base64_encode(b"999999999"), self.token),
+            (urlsafe_base64_encode(b"abc"), self.token),
+        ]:
+            with self.subTest(uid=uid, token=token):
+                self.assertInvalidLink(uid, token)
+
+    def test_inactive_user(self):
+        """is_active False -> invalid, even with a right token."""
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        self.assertInvalidLink(self.uid, self.token)
+
+    def test_weak_password_rejected_and_link_still_valid(self):
+        """'123' -> InvalidData on 'new_password'; the password is unchanged and the link still works."""
+        with self.assertRaises(InvalidData) as caught:
+            reset_password(self.uid, self.token, "123")
+        self.assertIn("new_password", caught.exception.payload()["errors"])
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("Old-pass-123"))
+        self.assertEqual(user_for_password_reset(self.uid, self.token), self.user)

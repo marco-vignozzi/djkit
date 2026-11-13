@@ -3,6 +3,27 @@
 All notable changes to djkit. Versions follow semantic versioning
 (MAJOR: incompatible changes, MINOR: new features, PATCH: fixes).
 
+## [0.3.0] — unreleased
+
+### Added
+- `mail` (new module): `render_email` (subject and body from two
+  templates), `send_email` (plain-text email through `django.core.mail`,
+  errors raised to the caller), `demo_mode`, `ReadableConsoleBackend` (development backend printing
+  emails as readable text); setting `DJKIT_MAIL_DEMO_MODE`
+  (emails only logged). Replaces the planned `send_email(subject, body, to,
+  demo_mode=...)` and `DJKIT_DEMO_MODE`.
+- `api.InputSchema`: base of request bodies that rejects undeclared fields
+  (Pydantic `extra_forbidden` -> 422 with message key `unknown_field`);
+  `ConfirmationIn` now inherits it.
+- `numbers` (new module): `split_evenly` (equal parts with a fixed
+  precision, leftover steps to the first parts).
+- `audit`: setting `DJKIT_AUDIT_MASKED_FIELDS`, `mask_changes`,
+  `mask_value`, `masked_fields`; `log_write` masks those fields (message
+  key `audit_masked`).
+- `auth`: password reset by link, `password_reset_token`,
+  `user_for_password_reset`, `reset_password` (message key
+  `password_reset_invalid`).
+
 ## [0.2.0] — unreleased
 
 ### Added

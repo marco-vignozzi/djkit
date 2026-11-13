@@ -157,6 +157,21 @@ class NinjaErrorTests(ApiTestCase):
             {"name": ["This field is required."], "age": ["Enter a valid number."]},
         )
 
+    def test_unknown_fields_are_rejected(self):
+        """InputSchema: 'nickname' and 'agee' not declared -> 422 'This field is not accepted.' on each of them."""
+        response = self.client.post("/api/public/person", {"name": "Anna", "age": 30, "nickname": "A", "agee": 3})
+        self.assertStatus(response, 422)
+        self.assertEqual(
+            response.json()["errors"],
+            {"nickname": ["This field is not accepted."], "agee": ["This field is not accepted."]},
+        )
+
+    def test_unknown_field_in_confirmation_body(self):
+        """ConfirmationIn {'confirmation': 2} (typo) -> 422 on 'confirmation', not a 428 with 0 confirmations."""
+        response = self.client.delete("/api/public/confirm", {"confirmation": 2})
+        self.assertStatus(response, 422)
+        self.assertEqual(response.json()["errors"], {"confirmation": ["This field is not accepted."]})
+
     def test_malformed_json_body(self):
         """Body 'not json' -> 400 {'detail': 'The request body is not valid JSON.'} (Ninja refuses to parse it)."""
         response = self.client.post("/api/public/person", "not json")

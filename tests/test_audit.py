@@ -19,7 +19,7 @@ from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.db import connection, models
 from django.test import SimpleTestCase, TestCase, override_settings
 
-from djkit.audit import AuditAction, AuditEntryBase, diff, log_write, snapshot, to_json_value
+from djkit.audit import AuditAction, AuditEntryBase, diff, log_write, mask_changes, snapshot, to_json_value
 from djkit.testing.api import make_user
 
 
@@ -160,3 +160,46 @@ class LogWriteTests(TestCase):
         """The abstract base adds the 'djkit_audittestentry_action_valid' constraint."""
         names = {constraint.name for constraint in AuditTestEntry._meta.constraints}
         self.assertIn("djkit_audittestentry_action_valid", names)
+
+
+@override_settings(DJKIT_AUDIT_MASKED_FIELDS={"email", "phone"}, DJKIT_MESSAGES={})
+class MaskChangesTests(SimpleTestCase):
+    """mask_changes hides the values of the masked fields, not the fact that they changed."""
+
+    def test_snapshot_values_masked_empty_ones_kept(self):
+        """{'email': 'a@x.it', 'phone': '', 'name': 'Anna'} -> email '[hidden]', phone '', name kept."""
+        masked = mask_changes({"email": "a@x.it", "phone": "", "name": "Anna"})
+        self.assertEqual(masked, {"email": "[hidden]", "phone": "", "name": "Anna"})
+
+    def test_diff_pairs_masked_on_both_sides(self):
+        """{'email': ['a@x.it', 'b@x.it'], 'phone': [None, '333']} -> both values hidden, None kept."""
+        masked = mask_changes({"email": ["a@x.it", "b@x.it"], "phone": [None, "333"]})
+        self.assertEqual(masked, {"email": ["[hidden]", "[hidden]"], "phone": [None, "[hidden]"]})
+
+    @override_settings(DJKIT_AUDIT_MASKED_FIELDS=set())
+    def test_nothing_masked_by_default(self):
+        """No masked fields -> the changes are returned as they are."""
+        self.assertEqual(mask_changes({"email": "a@x.it"}), {"email": "a@x.it"})
+
+
+@override_settings(DJKIT_AUDIT_MASKED_FIELDS={"name"}, DJKIT_MESSAGES={"audit_masked": "[omesso]"})
+class LogWriteMaskingTests(TestCase):
+    """log_write stores the masked fields already masked, in snapshots and diffs."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        super().setUpClass()
+        with connection.schema_editor() as editor:
+            editor.create_model(AuditTestEntry)
+
+    def test_snapshot_and_diff_masked(self):
+        """CREATE of group 'red' -> {'name': '[omesso]'}; UPDATE red -> blue -> ['[omesso]', '[omesso]']."""
+        user = make_user()
+        group = Group.objects.create(name="red")
+        created = log_write(AuditTestEntry, user, AuditAction.CREATE, group)
+        before = snapshot(group)
+        group.name = "blue"
+        updated = log_write(AuditTestEntry, user, AuditAction.UPDATE, group, diff(before, snapshot(group)))
+        self.assertEqual(created.changes, {"name": "[omesso]"})
+        self.assertEqual(updated.changes, {"name": ["[omesso]", "[omesso]"]})
