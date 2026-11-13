@@ -30,6 +30,8 @@ DEFAULT_MESSAGES: dict[str, str] = {
     # db.ensure_unique / updates.apply_patch
     "unique": "This value is already used.",
     "field_not_editable": "This field cannot be changed.",
+    # db.ensure_not_deleted
+    "deleted_read_only": "This item has been deleted: it can only be consulted.",
     # auth
     "login_failed": "Invalid credentials.",
     "password_too_short": "This password is too short: it must contain at least {min_length} characters.",

@@ -58,7 +58,7 @@ djkit/
 ├── updates.py           # modifica parziale di un oggetto
 ├── fields.py            # campi a scelta, importi, vincoli CHECK
 ├── access.py            # lettura di un oggetto accessibile all'utente, o 404
-├── db.py                # QuerySet con filtro di accesso, subquery, controllo di unicità
+├── db.py                # QuerySet con filtro di accesso, eliminazione logica, subquery, controllo di unicità
 ├── dates.py             # date mensili e scadenze
 ├── validators.py        # normalizzazione di dati personali generici
 ├── it.py                # dati italiani: codice fiscale
@@ -110,7 +110,7 @@ di `djkit` resta in inglese, ma nessun messaggio inglese arriva all'utente.
 
 - `DEFAULT_MESSAGES: dict[str, str]`: chiave → testo inglese. Gruppi di chiavi:
   - eccezioni: `domain_error`, `not_found`, `conflict`, `invalid_data`, `confirmation_required`;
-  - `db`/`updates`: `unique`, `field_not_editable`;
+  - `db`/`updates`: `unique`, `field_not_editable`, `deleted_read_only`;
   - `auth`: `login_failed`, `password_too_short` (`{min_length}`), `password_too_similar`;
   - errori HTTP: `bad_request`, `unauthorized`, `forbidden`, `csrf_failed`, `method_not_allowed`,
     `too_many_requests`, `server_error`;
@@ -324,8 +324,10 @@ log_write(AuditLogEntry, request.user, AuditAction.UPDATE, invoice, changes, tea
 
 ### 4.5 `access` — Oggetti accessibili ✅
 
-- `get_accessible_or_404(source, user, pk, *, for_update=False, detail=None)`: restituisce
+- `get_accessible_or_404(source, user, pk, *, for_update=False, include_deleted=False, detail=None)`: restituisce
   `source.accessible_by(user).get(pk=pk)` oppure solleva `NotFound(detail)`.
+  - Con `include_deleted=True` trova anche le righe eliminate logicamente (serve un `db.SoftDeleteQuerySet`):
+    si usa per la consultazione; prima di una modifica va seguita da `db.ensure_not_deleted`.
   - `source` può essere un modello, un manager o un QuerySet; un QuerySet mantiene i suoi filtri.
   - Anche una chiave malformata (per esempio `"abc"` per un intero) dà `NotFound`, mai un errore 500.
   - Con `for_update` usa `select_for_update()`: va chiamata dentro `transaction.atomic()`.
@@ -355,7 +357,58 @@ class Invoice(models.Model):
 Invoice.objects.accessible_by(request.user)
 ```
   - `accessible_by(user)`: filtra le righe accessibili all'utente (isolamento dei dati tra gruppi).
+  - `ACCESS_CONDITIONS` (facoltativo, dizionario di lookup): condizioni aggiunte **nella stessa** `filter()` di
+    `ACCESS_PATH`, quindi su una relazione multipla controllano la **stessa** riga collegata (l'appartenenza che dà
+    l'accesso). Esempio: accesso solo tramite appartenenze non eliminate:
+
+```python
+class Project(models.Model):
+    ACCESS_PATH = "team__memberships__user"
+    ACCESS_CONDITIONS = {"team__memberships__is_deleted": False}
+```
   - `_model(name)`: restituisce un altro modello della **stessa app** del modello, senza import circolari.
+- `SoftDeleteModel`: modello astratto per l'**eliminazione logica**. Aggiunge `is_deleted` (`BooleanField`,
+  default `False`) e `deleted_at` (`DateTimeField`, vuoto finché la riga non è eliminata): eliminare una riga vuol
+  dire segnarla, non cancellarla, così le FK che la puntano restano valide e lo storico resta **consultabile**.
+  Il manager di default restituisce **tutte** le righe (admin, oggetti collegati, storico). Una riga eliminata è in
+  sola lettura (`ensure_not_deleted`).
+  - `deleted_state_constraint(name) -> CheckConstraint` (statico): vincolo del database che tiene coerenti i due
+    campi (eliminata ⇔ `deleted_at` valorizzato); va messo nei `Meta.constraints` del modello concreto.
+  - `mark_deleted(when=None)`: elimina logicamente la riga e salva solo i due campi; `when` è l'ora
+    dell'eliminazione (default: adesso), da passare uguale a tutte le righe eliminate dalla stessa operazione.
+- `SoftDeleteQuerySet(AccessibleQuerySet)`: QuerySet da usare con `SoftDeleteModel`.
+  - `alive()`: le righe non eliminate; `deleted()`: quelle eliminate.
+  - `filter_deleted(mode)`: applica un `DeletedFilter` (`ValueError` se il valore è sconosciuto).
+  - `accessible_by(user, include_deleted: bool = False)`: come in `AccessibleQuerySet`, ma **nasconde le righe
+    eliminate**; `include_deleted=True` le restituisce (consultazione, da combinare con `filter_deleted`). Senza,
+    `access.get_accessible_or_404` risponde `NotFound` su una riga eliminata, come se non esistesse.
+  - `mark_deleted(when=None) -> int`: elimina logicamente le righe con un solo `UPDATE` (niente `save()` né
+    segnali) e restituisce quante non erano ancora eliminate; quelle già eliminate tengono il loro `deleted_at`.
+  - I vincoli che devono ignorare le righe eliminate (unicità, esclusione) vanno dichiarati con
+    `condition=Q(is_deleted=False)`.
+- `DeletedFilter` (`TextChoices`): quali righe restituisce un elenco rispetto all'eliminazione logica:
+  `exclude` (solo le non eliminate, il default dell'interfaccia), `include` (tutte), `only` (solo le eliminate).
+  Si usa come tipo di un parametro di query: un valore non ammesso dà 422 (messaggio della chiave `choice`).
+- `ensure_not_deleted(obj, detail=None) -> None`: se la riga è eliminata solleva `Conflict(detail)` (409), con il
+  messaggio della chiave `deleted_read_only` se `detail` manca. Si chiama prima di ogni modifica di una riga che il
+  client può vedere anche da eliminata: 409 spiega il motivo meglio di un 404.
+
+```python
+class Customer(SoftDeleteModel):
+    ACCESS_PATH = "team__members"
+    objects = SoftDeleteQuerySet.as_manager()
+
+    class Meta:
+        constraints = [SoftDeleteModel.deleted_state_constraint("customer_deleted_state")]
+
+@router.get("/customers")
+def list_customers(request, deleted: DeletedFilter = DeletedFilter.EXCLUDE):
+    return Customer.objects.accessible_by(request.user, include_deleted=True).filter_deleted(deleted)
+
+customer = get_accessible_or_404(Customer, user, pk, for_update=True, include_deleted=True)
+ensure_not_deleted(customer)                          # 409 se eliminato
+customer.mark_deleted()                               # eliminazione logica
+```
 - `sum_subquery(queryset, field: str = "amount", max_digits: int = 14, decimal_places: int = 2) -> Coalesce`:
   subquery correlata con la somma di un campo, come `DecimalField(max_digits, decimal_places)`. Se non ci sono
   righe restituisce 0 con `decimal_places` decimali (`Decimal("0.00")`). Si usa in `annotate()`.

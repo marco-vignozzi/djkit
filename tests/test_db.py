@@ -128,6 +128,17 @@ class AccessibleQuerySetTests(TestCase):
         self.assertIn(self.red, self.groups.accessible_by(self.anna))
         self.assertIn(self.red, self.groups.accessible_by(self.bruno))
 
+    def test_access_conditions_apply_to_the_same_related_row(self):
+        """
+        ACCESS_CONDITIONS on Anna's codename: Anna -> 'red'; Bruno, also in
+        'red', -> nothing (the condition tests his own row, not Anna's).
+        """
+        self.red.permissions.add(self.bruno)
+        conditions = {"permissions__codename": self.anna.codename}
+        with mock.patch.object(Group, "ACCESS_CONDITIONS", conditions, create=True):
+            self.assertQuerySetEqual(self.groups.accessible_by(self.anna), [self.red])
+            self.assertQuerySetEqual(self.groups.accessible_by(self.bruno), [])
+
     def test_model_lookup_stays_in_the_same_app(self):
         """On auth.Group, _model('Permission') -> auth.Permission."""
         self.assertIs(self.groups._model("Permission"), Permission)

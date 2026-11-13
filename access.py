@@ -13,7 +13,9 @@ from django.db import models
 from .errors import NotFound
 
 
-def get_accessible_or_404(source, user, pk, *, for_update: bool = False, detail: str | None = None):
+def get_accessible_or_404(
+    source, user, pk, *, for_update: bool = False, include_deleted: bool = False, detail: str | None = None
+):
     """
     Load one object by primary key among those the user may access.
 
@@ -26,6 +28,9 @@ def get_accessible_or_404(source, user, pk, *, for_update: bool = False, detail:
             for an integer key, also gives NotFound).
         for_update: lock the row with SELECT ... FOR UPDATE (call inside
             transaction.atomic()).
+        include_deleted: also find rows deleted logically (needs a
+            djkit.db.SoftDeleteQuerySet); before a write, follow it with
+            djkit.db.ensure_not_deleted.
         detail: user-facing message of the NotFound.
 
     Returns:
@@ -38,7 +43,7 @@ def get_accessible_or_404(source, user, pk, *, for_update: bool = False, detail:
         queryset = source._default_manager.all()
     else:
         queryset = source.all()
-    queryset = queryset.accessible_by(user)
+    queryset = queryset.accessible_by(user, include_deleted=True) if include_deleted else queryset.accessible_by(user)
     if for_update:
         queryset = queryset.select_for_update()
     try:

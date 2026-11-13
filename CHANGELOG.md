@@ -27,6 +27,16 @@ All notable changes to djkit. Versions follow semantic versioning
   `messages` texts (`http_error_message`).
 - `auth`: `MinimumLengthValidator` and `UserAttributeSimilarityValidator`,
   Django's password validators with `messages` texts.
+- `db`: logical deletion. `SoftDeleteModel` (abstract, `is_deleted` and
+  `deleted_at` fields, `deleted_state_constraint`, `mark_deleted`),
+  `SoftDeleteQuerySet` (`alive`, `deleted`, `filter_deleted`,
+  `mark_deleted`; `accessible_by(user, include_deleted=False)` hides
+  deleted rows), `DeletedFilter` (`exclude` / `include` / `only`) and
+  `ensure_not_deleted` (409 on a write to a deleted row, message key
+  `deleted_read_only`).
+- `db.AccessibleQuerySet`: optional `ACCESS_CONDITIONS` on the model, extra
+  lookups applied in the same `filter()` as `ACCESS_PATH`.
+- `access.get_accessible_or_404`: `include_deleted` argument.
 
 ### Changed
 - `errors`: the default detail of each exception comes from its

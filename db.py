@@ -11,14 +11,23 @@ Query helpers.
     - date_filter: optional "on or before a date" filter.
     - ensure_unique: raise Conflict when values are already used by other
       rows (checked before saving, to answer 409 instead of 422).
+    - SoftDeleteModel / SoftDeleteQuerySet / DeletedFilter: logical
+      deletion ("soft delete"): the row stays with is_deleted = True and
+      deleted_at set, so every reference to it keeps working and it can
+      still be consulted; accessible_by hides it unless asked otherwise.
+    - ensure_not_deleted: raise Conflict on a write to a deleted row (it is
+      read-only).
 """
 
 from datetime import date
 from decimal import Decimal
 
+from datetime import datetime
+
 from django.db import models
 from django.db.models import DecimalField, F, Func, IntegerField, Q, Subquery, Value
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from .errors import Conflict
 from .messages import get_message
@@ -126,6 +135,14 @@ class AccessibleQuerySet(models.QuerySet):
         class Invoice(models.Model):
             ACCESS_PATH = "team__members"
             objects = AccessibleQuerySet.as_manager()
+
+    Optionally it declares ACCESS_CONDITIONS, extra lookups applied in the
+    same filter() call as ACCESS_PATH, so on a multi-valued relation they
+    test the same related row (the membership that grants access), e.g.
+    only memberships not deleted:
+
+        ACCESS_PATH = "team__memberships__user"
+        ACCESS_CONDITIONS = {"team__memberships__is_deleted": False}
     """
 
     def accessible_by(self, user) -> "AccessibleQuerySet":
@@ -138,7 +155,8 @@ class AccessibleQuerySet(models.QuerySet):
         Returns:
             A QuerySet with only the rows the user may see and change.
         """
-        return self.filter(**{self.model.ACCESS_PATH: user})
+        conditions = getattr(self.model, "ACCESS_CONDITIONS", {})
+        return self.filter(**{self.model.ACCESS_PATH: user, **conditions})
 
     def _model(self, name: str):
         """
@@ -153,3 +171,176 @@ class AccessibleQuerySet(models.QuerySet):
             The model class.
         """
         return self.model._meta.apps.get_model(self.model._meta.app_label, name)
+
+
+class DeletedFilter(models.TextChoices):
+    """
+    Which rows a list returns with respect to logical deletion; use it as
+    the type of a query parameter (invalid values -> 422).
+
+    Values:
+        EXCLUDE -> only the rows not deleted (the default of the interface).
+        INCLUDE -> every row, deleted ones included.
+        ONLY    -> only the deleted rows.
+    """
+
+    EXCLUDE = "exclude", "exclude"
+    INCLUDE = "include", "include"
+    ONLY = "only", "only"
+
+
+class SoftDeleteModel(models.Model):
+    """
+    Abstract base for models deleted logically ("soft delete"): deleting a
+    row marks it instead of removing it, so foreign keys that point to it
+    stay valid and the history stays complete and can be consulted.
+
+    Use it with SoftDeleteQuerySet (or a subclass) as manager, and add
+    deleted_state_constraint to the model's constraints:
+
+        class Customer(SoftDeleteModel):
+            ACCESS_PATH = "team__members"
+            objects = SoftDeleteQuerySet.as_manager()
+
+            class Meta:
+                constraints = [SoftDeleteModel.deleted_state_constraint("customer_deleted_state")]
+
+    The default manager still returns every row (deleted ones included), so
+    admin pages, related objects and history queries see them; queries for
+    the interface start from accessible_by(user), which hides them unless
+    asked otherwise. A deleted row is read-only (ensure_not_deleted).
+
+    Fields:
+        is_deleted -> True once the row has been deleted logically.
+        deleted_at -> when it was deleted; empty while not deleted.
+    """
+
+    is_deleted = models.BooleanField("deleted", default=False)
+    deleted_at = models.DateTimeField("deleted at", null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    @staticmethod
+    def deleted_state_constraint(name: str) -> models.CheckConstraint:
+        """
+        Database check that keeps the two fields consistent: a deleted row
+        has deleted_at, a row not deleted has none.
+
+        Args:
+            name: constraint name, unique in the database.
+
+        Returns:
+            The CheckConstraint to put in the model's Meta.constraints.
+        """
+        return models.CheckConstraint(
+            condition=Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False),
+            name=name,
+        )
+
+    def mark_deleted(self, when: datetime | None = None) -> None:
+        """
+        Delete this row logically and save only the two deletion fields.
+
+        Args:
+            when: deletion time; None means now. Pass the same value to
+                every row deleted by one operation.
+        """
+        self.is_deleted = True
+        self.deleted_at = when or timezone.now()
+        self.save(update_fields=["is_deleted", "deleted_at"])
+
+
+class SoftDeleteQuerySet(AccessibleQuerySet):
+    """
+    AccessibleQuerySet for SoftDeleteModel subclasses: deleted rows are
+    hidden from accessible_by unless explicitly requested.
+    """
+
+    def alive(self) -> "SoftDeleteQuerySet":
+        """
+        Rows not deleted.
+
+        Returns:
+            The rows with is_deleted = False.
+        """
+        return self.filter(is_deleted=False)
+
+    def deleted(self) -> "SoftDeleteQuerySet":
+        """
+        Rows deleted logically.
+
+        Returns:
+            The rows with is_deleted = True.
+        """
+        return self.filter(is_deleted=True)
+
+    def filter_deleted(self, mode: str) -> "SoftDeleteQuerySet":
+        """
+        Apply a DeletedFilter.
+
+        Args:
+            mode: a DeletedFilter value ("exclude", "include", "only").
+
+        Returns:
+            alive(), every row, or deleted().
+
+        Raises:
+            ValueError: unknown mode (a programming error: the API validates
+                the parameter before).
+        """
+        if mode == DeletedFilter.EXCLUDE:
+            return self.alive()
+        if mode == DeletedFilter.INCLUDE:
+            return self.all()
+        if mode == DeletedFilter.ONLY:
+            return self.deleted()
+        raise ValueError(f"Unknown DeletedFilter value: {mode!r}")
+
+    def accessible_by(self, user, include_deleted: bool = False) -> "SoftDeleteQuerySet":
+        """
+        Restrict the rows to those the user may access, hiding the deleted
+        ones (a deleted row then behaves as missing: get_accessible_or_404
+        gives NotFound).
+
+        Args:
+            user: the user making the request.
+            include_deleted: True also returns deleted rows (consultation;
+                combine with filter_deleted).
+
+        Returns:
+            The accessible rows, without the deleted ones by default.
+        """
+        rows = super().accessible_by(user)
+        return rows if include_deleted else rows.alive()
+
+    def mark_deleted(self, when: datetime | None = None) -> int:
+        """
+        Delete the rows logically, in one UPDATE (no save() or signals).
+        Rows already deleted keep their original deleted_at.
+
+        Args:
+            when: deletion time; None means now.
+
+        Returns:
+            The number of rows that were not deleted yet and are now.
+        """
+        return self.alive().update(is_deleted=True, deleted_at=when or timezone.now())
+
+
+def ensure_not_deleted(obj: SoftDeleteModel, detail: str | None = None) -> None:
+    """
+    Stop a write to a row deleted logically: it can still be consulted, but
+    is read-only.
+
+    Args:
+        obj: the row about to be changed.
+        detail: user-facing message; the "deleted_read_only" message when
+            None.
+
+    Raises:
+        Conflict: the row is deleted (409, more telling than a 404 for a row
+            the client can see).
+    """
+    if obj.is_deleted:
+        raise Conflict(detail or get_message("deleted_read_only"))
