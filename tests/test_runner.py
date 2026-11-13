@@ -7,15 +7,20 @@ Run with: python manage.py test djkit.tests.test_runner
 
 from pathlib import Path
 
+from django.conf import settings
 from django.test import SimpleTestCase, override_settings
 
+from djkit.testing import runner
 from djkit.testing.runner import (
     DEFAULT_EXCLUDED_DIRS,
     DEFAULT_EXCLUDED_FILES,
+    DEFAULT_TEST_PASSWORD_HASHERS,
     TESTING_PACKAGE_DIR,
     excluded_dirs,
     excluded_files,
     first_doc_line,
+    password_hashers_for_tests,
+    project_password_hashers,
     project_source,
     readable_name,
 )
@@ -109,3 +114,25 @@ class ExclusionSettingsTests(SimpleTestCase):
     def test_custom_files_replace_defaults(self):
         """DJKIT_TEST_EXCLUDED_FILES={'conftest.py'} -> {'conftest.py'}."""
         self.assertEqual(excluded_files(), {"conftest.py"})
+
+
+class PasswordHashersForTestsTests(SimpleTestCase):
+    """The runner swaps in fast password hashers; the project's stay reachable."""
+
+    def test_default_is_the_fast_hasher(self):
+        """Without the setting -> DEFAULT_TEST_PASSWORD_HASHERS (MD5PasswordHasher)."""
+        self.assertEqual(password_hashers_for_tests(), list(DEFAULT_TEST_PASSWORD_HASHERS))
+
+    @override_settings(DJKIT_TEST_PASSWORD_HASHERS=None)
+    def test_none_keeps_the_project_hashers(self):
+        """DJKIT_TEST_PASSWORD_HASHERS=None -> None (no replacement)."""
+        self.assertIsNone(password_hashers_for_tests())
+
+    def test_runner_installed_the_test_hashers_and_kept_the_project_ones(self):
+        """During the run PASSWORD_HASHERS is the test list; project_password_hashers() gives the saved one."""
+        hashers = password_hashers_for_tests()
+        if hashers is None:
+            self.skipTest("DJKIT_TEST_PASSWORD_HASHERS is None in this project.")
+        self.assertEqual(settings.PASSWORD_HASHERS, hashers)
+        self.assertIsNotNone(runner._project_password_hashers)
+        self.assertEqual(project_password_hashers(), runner._project_password_hashers)

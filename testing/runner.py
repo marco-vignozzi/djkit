@@ -31,6 +31,9 @@ Settings (all optional):
                                  "config.settings") is always excluded too.
     DJKIT_TEST_EXCLUDED_FILES -> file names never reported
                                  (default: DEFAULT_EXCLUDED_FILES).
+    DJKIT_TEST_PASSWORD_HASHERS -> PASSWORD_HASHERS used while the tests run
+                                 (default: DEFAULT_TEST_PASSWORD_HASHERS, a
+                                 fast hasher); None keeps the project's own.
 Files whose name starts with "test" and djkit's own testing package are
 never reported either. BASE_DIR is the root of the reported paths.
 """
@@ -42,12 +45,23 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.color import color_style
 from django.test.runner import DiscoverRunner
+from django.test.utils import override_settings
 
 # Default path parts / file names that are never reported as "code under
 # test": the tests themselves, their data builders, migrations and the
 # virtualenv. Overridable with DJKIT_TEST_EXCLUDED_DIRS / _FILES.
 DEFAULT_EXCLUDED_DIRS = frozenset({"tests", "migrations", ".venv", "venv", "site-packages"})
 DEFAULT_EXCLUDED_FILES = frozenset({"tests.py", "factories.py", "apps.py", "admin.py", "__init__.py"})
+
+# Password hashers used while the tests run. The production hashers are slow
+# on purpose (PBKDF2 with ~1M iterations, ~0.5 s per hash), and every test
+# user pays that price: a fast hasher keeps the suite quick. Never used
+# outside the tests. Overridable with DJKIT_TEST_PASSWORD_HASHERS.
+DEFAULT_TEST_PASSWORD_HASHERS = ("django.contrib.auth.hashers.MD5PasswordHasher",)
+
+# PASSWORD_HASHERS of the project, saved by VerboseTestRunner before it
+# installs the test hashers (None while no replacement is active).
+_project_password_hashers: list[str] | None = None
 
 # This package (runner and test helpers): it runs during every test but is
 # never code under test.
@@ -87,6 +101,34 @@ def excluded_files() -> frozenset[str]:
         settings.DJKIT_TEST_EXCLUDED_FILES, or DEFAULT_EXCLUDED_FILES.
     """
     return frozenset(getattr(settings, "DJKIT_TEST_EXCLUDED_FILES", DEFAULT_EXCLUDED_FILES))
+
+
+def password_hashers_for_tests() -> list[str] | None:
+    """
+    Password hashers to install while the tests run.
+
+    Returns:
+        settings.DJKIT_TEST_PASSWORD_HASHERS (or DEFAULT_TEST_PASSWORD_HASHERS)
+        as a list, or None when the setting is None (keep the project's own).
+    """
+    hashers = getattr(settings, "DJKIT_TEST_PASSWORD_HASHERS", DEFAULT_TEST_PASSWORD_HASHERS)
+    return None if hashers is None else list(hashers)
+
+
+def project_password_hashers() -> list[str]:
+    """
+    The project's real PASSWORD_HASHERS, also while the test hashers are on.
+
+    Meant for the few tests that check how passwords are stored in
+    production, e.g. `with override_settings(PASSWORD_HASHERS=project_password_hashers()):`.
+
+    Returns:
+        The hashers VerboseTestRunner replaced, or settings.PASSWORD_HASHERS
+        when no replacement is active.
+    """
+    if _project_password_hashers is not None:
+        return list(_project_password_hashers)
+    return list(settings.PASSWORD_HASHERS)
 
 
 def project_source(
@@ -446,8 +488,31 @@ class VerboseTestRunner(DiscoverRunner):
     Django test runner that uses VerboseTextTestResult.
 
     Falls back to Django's own result classes with `-v 0`, `--debug-sql`
-    or `--pdb`.
+    or `--pdb`. While the tests run, PASSWORD_HASHERS is replaced by
+    password_hashers_for_tests() (see DEFAULT_TEST_PASSWORD_HASHERS).
     """
+
+    def setup_test_environment(self, **kwargs):
+        """Django's test environment, plus the fast test password hashers."""
+        global _project_password_hashers
+        super().setup_test_environment(**kwargs)
+        self._hashers_override = None
+        hashers = password_hashers_for_tests()
+        if hashers is not None:
+            _project_password_hashers = list(settings.PASSWORD_HASHERS)
+            # override_settings also sends setting_changed, which clears
+            # Django's cache of the hasher instances.
+            self._hashers_override = override_settings(PASSWORD_HASHERS=hashers)
+            self._hashers_override.enable()
+
+    def teardown_test_environment(self, **kwargs):
+        """Restore the project's password hashers, then Django's teardown."""
+        global _project_password_hashers
+        if self._hashers_override is not None:
+            self._hashers_override.disable()
+            self._hashers_override = None
+            _project_password_hashers = None
+        super().teardown_test_environment(**kwargs)
 
     def get_resultclass(self):
         """Return the result class used by the unittest runner."""

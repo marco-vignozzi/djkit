@@ -37,6 +37,11 @@ All notable changes to djkit. Versions follow semantic versioning
 - `db.AccessibleQuerySet`: optional `ACCESS_CONDITIONS` on the model, extra
   lookups applied in the same `filter()` as `ACCESS_PATH`.
 - `access.get_accessible_or_404`: `include_deleted` argument.
+- `testing.runner`: `VerboseTestRunner` uses fast password hashers while
+  the tests run (`DEFAULT_TEST_PASSWORD_HASHERS`, setting
+  `DJKIT_TEST_PASSWORD_HASHERS`, `None` to keep the project's own);
+  `password_hashers_for_tests`, `project_password_hashers` for the tests
+  that check the real hashers.
 
 ### Changed
 - `errors`: the default detail of each exception comes from its

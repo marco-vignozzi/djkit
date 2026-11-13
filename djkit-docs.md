@@ -90,6 +90,7 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 |---|---|---|---|---|
 | `DJKIT_TEST_EXCLUDED_DIRS` | `{"tests", "migrations", ".venv", "venv", "site-packages"}` | `testing.runner` | parti di percorso mai mostrate come "codice sotto test"; il valore **sostituisce** il default. Le cartelle del modulo settings (da `SETTINGS_MODULE`, es. `config` per `config.settings`) sono sempre escluse in aggiunta | ✅ |
 | `DJKIT_TEST_EXCLUDED_FILES` | `{"tests.py", "factories.py", "apps.py", "admin.py", "__init__.py"}` | `testing.runner` | nomi di file mai mostrati come "codice sotto test"; il valore **sostituisce** il default | ✅ |
+| `DJKIT_TEST_PASSWORD_HASHERS` | `("django.contrib.auth.hashers.MD5PasswordHasher",)` | `testing.runner` | `PASSWORD_HASHERS` usati **solo durante i test**, al posto di quelli del progetto (lenti apposta: PBKDF2 impiega circa 0,5 s per hash). `None` lascia quelli del progetto | ✅ |
 | `DJKIT_AUDIT_EXCLUDED_FIELDS` | `{"password"}` | `audit`, `updates` | campi mai scritti nel registro (né nelle `snapshot`, né nei `diff`); il valore **sostituisce** il default | ✅ |
 | `DJKIT_MESSAGES` | `{}` | `messages` (e quindi `errors`, `api`, `views`, `auth`, `db`, `updates`) | testi dei messaggi per l'utente, `{chiave: testo}`; le chiavi assenti restano col testo inglese di `DEFAULT_MESSAGES`. Un progetto in un'altra lingua le fornisce **tutte** (vedi §4.0) | ✅ |
 | `DJKIT_DEMO_MODE` | `False` | `mail` | se vero le email non partono e vengono solo registrate nel log (il progetto può passarlo anche come parametro) | 📝 |
@@ -460,6 +461,18 @@ Funzioni pure, senza database.
   - `-v 0`: output standard di Django.
   - `-v 2`: aggiunge anche i messaggi di Django.
   - `--debug-sql` e `--pdb`: si usano le classi di Django.
+  - Durante i test sostituisce `PASSWORD_HASHERS` con `password_hashers_for_tests()` (in
+    `setup_test_environment`, con `override_settings`) e rimette quelli del progetto in
+    `teardown_test_environment`. Vale con ogni verbosità.
+- `DEFAULT_TEST_PASSWORD_HASHERS`: `("django.contrib.auth.hashers.MD5PasswordHasher",)`, un hash veloce. Le password
+  di test non sono segrete; i hasher di produzione sono lenti apposta e ogni utente creato nei test ne pagherebbe il
+  costo.
+- `password_hashers_for_tests() -> list[str] | None`: `DJKIT_TEST_PASSWORD_HASHERS` (o
+  `DEFAULT_TEST_PASSWORD_HASHERS`) come lista; `None` se il setting è `None`.
+- `project_password_hashers() -> list[str]`: i `PASSWORD_HASHERS` veri del progetto, anche mentre il runner ha
+  installato quelli di test. Serve ai pochi test che verificano come vengono salvate le password in produzione:
+  `with override_settings(PASSWORD_HASHERS=project_password_hashers()): ...`. Anche `check_password` va chiamato
+  dentro il blocco, perché riconosce solo gli algoritmi elencati in `PASSWORD_HASHERS`.
 - `project_source(filename, root, skip_dirs, skip_files, skip_tree=TESTING_PACKAGE_DIR) -> str | None`: decide se un
   file è codice del progetto sotto test e restituisce il percorso relativo a `root`. Restituisce `None` in questi casi:
   il file è fuori da `root`, non è un `.py`, il suo nome inizia con `test`, ha un nome in `skip_files`, sta in una
