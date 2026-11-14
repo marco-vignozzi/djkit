@@ -3,6 +3,15 @@
 All notable changes to djkit. Versions follow semantic versioning
 (MAJOR: incompatible changes, MINOR: new features, PATCH: fixes).
 
+## [0.4.0] — unreleased
+
+### Added
+- `deadlines` (new module): `Deadline` and `DeadlineRegistry` (one
+  provider per kind of deadline, `collect(user, start, end, kinds)` merges
+  and checks them), for calendars and notifications.
+- `dates.yearly_anniversaries(origin, start, end)`: anniversaries of a date
+  in a period (29 February -> 28 February in common years).
+
 ## [0.3.0] — unreleased
 
 ### Added

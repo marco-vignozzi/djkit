@@ -59,7 +59,8 @@ djkit/
 ├── fields.py            # campi a scelta, importi, vincoli CHECK
 ├── access.py            # lettura di un oggetto accessibile all'utente, o 404
 ├── db.py                # QuerySet con filtro di accesso, eliminazione logica, subquery, controllo di unicità
-├── dates.py             # date mensili e scadenze
+├── dates.py             # date mensili, anniversari annuali
+├── deadlines.py         # registro delle scadenze di un progetto (calendario, notifiche)
 ├── validators.py        # normalizzazione di dati personali generici e dei testi in ingresso
 ├── it.py                # dati italiani: codice fiscale
 ├── mail.py              # invio email (testi da template) con modalità demo
@@ -474,7 +475,7 @@ customer.mark_deleted()                               # eliminazione logica
 ensure_unique(Customer, {"email": email, "vat_number": vat}, exclude_pk=customer.pk)
 ```
 
-### 4.7 `dates` — Date mensili ✅
+### 4.7 `dates` — Date mensili e annuali ✅
 
 Funzioni pure, senza database.
 
@@ -485,6 +486,38 @@ Funzioni pure, senza database.
 - `monthly_due_dates(start_date, end_date) -> list[date]`: la prima scadenza è `start_date`, poi lo stesso giorno
   di ogni mese (adattato alla lunghezza del mese, senza "slittare": 31/1 → 28/2 → 31/3), fino a `end_date`
   incluso. Lista vuota se `end_date < start_date`.
+- `yearly_anniversaries(origin, start, end) -> list[date]`: gli anniversari di `origin` (uno, due… anni dopo; non
+  `origin` stessa) compresi tra `start` e `end` inclusi, in ordine. Un 29 febbraio cade il 28 negli anni non
+  bisestili. Lista vuota se `end < start`.
+
+### 4.7a `deadlines` — Registro delle scadenze ✅
+
+Un solo punto in cui un progetto raccoglie ogni tipo di scadenza (pagamenti, rinnovi, fine di un contratto…), per
+una pagina calendario e per le notifiche: leggendo tutti e due lo stesso registro, non possono dare risultati
+diversi. Un nuovo tipo si aggiunge registrando un provider, senza toccare chi chiama `collect`.
+
+- `Deadline` (dataclass immutabile): `kind` (codice del tipo, in inglese), `due_date`, `subject` (codice di ciò a cui
+  si riferisce, es. `"invoice"`), `subject_id`, `amount: Decimal | None = None`, `context: dict` (dati extra
+  serializzabili in JSON per l'interfaccia).
+- `DeadlineRegistry()`:
+  - `provider(kind)` → decoratore che registra la funzione `(user, start, end) -> Iterable[Deadline]` del tipo; un
+    secondo provider per lo stesso tipo → `ValueError`;
+  - `kinds() -> list[str]`: i tipi registrati, ordinati;
+  - `collect(user, start, end, kinds=None) -> list[Deadline]`: le scadenze di tutti i provider (o solo di `kinds`)
+    ordinate per data, tipo e id. `end < start` o un tipo sconosciuto → `ValueError`; un provider che restituisce
+    una scadenza di un altro tipo o fuori dal periodo → `ValueError` (è un suo bug). Le regole d'accesso le applica
+    ogni provider.
+
+```python
+registry = DeadlineRegistry()
+
+@registry.provider("invoice_due")
+def invoices_due(user, start, end):
+    return [Deadline("invoice_due", i.due_date, "invoice", i.pk, amount=i.total)
+            for i in Invoice.objects.accessible_by(user).filter(due_date__range=(start, end))]
+
+registry.collect(user, date(2026, 6, 1), date(2026, 6, 30))
+```
 
 ### 4.8 `validators` e `it` — Dati personali ✅
 

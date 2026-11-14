@@ -10,7 +10,7 @@ from datetime import date
 
 from django.test import SimpleTestCase
 
-from djkit.dates import add_months, clamped_date, monthly_due_dates
+from djkit.dates import add_months, clamped_date, monthly_due_dates, yearly_anniversaries
 
 
 class ClampedDateTests(SimpleTestCase):
@@ -90,3 +90,29 @@ class MonthlyDueDatesTests(SimpleTestCase):
 
     def test_end_before_start_gives_nothing(self):
         self.assertEqual(monthly_due_dates(date(2026, 5, 1), date(2026, 4, 30)), [])
+
+
+class YearlyAnniversariesTests(SimpleTestCase):
+    """yearly_anniversaries lists the anniversaries of a date inside a period."""
+
+    def test_anniversaries_in_the_period(self):
+        """Origin 15/3/2026, period 2026-2028 -> 15/3/2027, 15/3/2028 (not the origin)."""
+        self.assertEqual(
+            yearly_anniversaries(date(2026, 3, 15), date(2026, 1, 1), date(2028, 12, 31)),
+            [date(2027, 3, 15), date(2028, 3, 15)],
+        )
+
+    def test_period_edges_are_included(self):
+        """Period 15/3/2027-15/3/2027 -> [15/3/2027]; 16/3/2027-14/3/2028 -> []."""
+        origin = date(2026, 3, 15)
+        self.assertEqual(yearly_anniversaries(origin, date(2027, 3, 15), date(2027, 3, 15)), [date(2027, 3, 15)])
+        self.assertEqual(yearly_anniversaries(origin, date(2027, 3, 16), date(2028, 3, 14)), [])
+
+    def test_leap_day_falls_on_28_february(self):
+        """Origin 29/2/2028 -> 28/2/2029, 28/2/2030 ... 29/2/2032."""
+        found = yearly_anniversaries(date(2028, 2, 29), date(2029, 1, 1), date(2032, 12, 31))
+        self.assertEqual(found, [date(2029, 2, 28), date(2030, 2, 28), date(2031, 2, 28), date(2032, 2, 29)])
+
+    def test_reversed_period_is_empty(self):
+        """end before start -> []."""
+        self.assertEqual(yearly_anniversaries(date(2026, 3, 15), date(2028, 1, 1), date(2027, 1, 1)), [])

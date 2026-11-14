@@ -1,8 +1,8 @@
 """
-Monthly date helpers.
+Monthly and yearly date helpers.
 
-Pure functions (no database, no Django imports) for monthly schedules such as
-installments, subscriptions or recurring invoices.
+Pure functions (no database, no Django imports) for recurring schedules such
+as installments, subscriptions, recurring invoices or yearly renewals.
 
 Rule of monthly_due_dates:
     - the first date is the start date;
@@ -73,3 +73,27 @@ def monthly_due_dates(start_date: date, end_date: date) -> list[date]:
             return dates
         dates.append(due)
         months += 1
+
+
+def yearly_anniversaries(origin: date, start: date, end: date) -> list[date]:
+    """
+    List the anniversaries of a date (one, two... years later) in a period.
+
+    A 29 February origin falls on 28 February in the years without it.
+
+    Args:
+        origin: the date the anniversaries count from (not an anniversary
+            itself).
+        start: first day of the period (inclusive).
+        end: last day of the period (inclusive).
+
+    Returns:
+        The anniversaries in chronological order with start <= date <= end;
+        empty if end < start.
+    """
+    dates = []
+    for year in range(max(origin.year + 1, start.year), end.year + 1):
+        due = clamped_date(year, origin.month, origin.day)
+        if start <= due <= end:
+            dates.append(due)
+    return dates

@@ -8,4 +8,4 @@ documented in djkit-docs.md; changes are listed in CHANGELOG.md.
 """
 
 # Semantic version of the framework (MAJOR.MINOR.PATCH), see CHANGELOG.md.
-__version__ = "0.3.0"
+__version__ = "0.4.0"
