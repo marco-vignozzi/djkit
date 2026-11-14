@@ -3,6 +3,14 @@
 All notable changes to djkit. Versions follow semantic versioning
 (MAJOR: incompatible changes, MINOR: new features, PATCH: fixes).
 
+## [0.6.0] — unreleased
+
+### Added
+- `numbers.split_by_weights(total, weights, step)`: proportional parts
+  that add up exactly to the total (largest remainder method).
+- `numbers.minimal_transfers(balances)`: the fewest transfers that bring
+  balances adding up to zero to zero.
+
 ## [0.5.0] — unreleased
 
 ### Added

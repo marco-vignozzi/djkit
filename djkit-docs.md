@@ -64,7 +64,7 @@ djkit/
 ├── validators.py        # normalizzazione di dati personali generici e dei testi in ingresso
 ├── it.py                # dati italiani: codice fiscale
 ├── mail.py              # invio email (testi da template) con modalità demo
-├── numbers.py           # divisione di un totale in parti uguali
+├── numbers.py           # divisione di un totale in parti uguali o per pesi, trasferimenti minimi
 ├── texts.py             # catalogo dei testi per chiave, servito al frontend con ETag, chiavi esportate in TypeScript
 ├── management/commands/export_text_types.py   # comando che scrive le chiavi del catalogo in un file .ts
 ├── testing/
@@ -602,6 +602,21 @@ CATALOG.text("ui.cart.items", count=3)    # "3 articoli"
   **prime** parti, così la somma è sempre esattamente `total` e chi riceve i centesimi lo decide il chiamante
   ordinando i propri elementi. Esempio: 100 in 3 → `[33.34, 33.33, 33.33]`. `parts < 1` o `total` non multiplo di
   `step` → `ValueError`.
+- `split_by_weights(total: Decimal, weights: Sequence[Decimal], step: Decimal = CENT) -> list[Decimal]`: divide `total`
+  (anche negativo) in proporzione ai pesi, con il metodo dei resti più grandi: ogni parte è arrotondata verso zero a
+  `step` e gli `step` che avanzano vanno alle parti con il resto scartato più grande (a parità, le prime). La somma è
+  sempre esattamente `total`. Esempio: 100 per `[1, 1, 1]` → `[33.34, 33.33, 33.33]`. Nessun peso, un peso negativo,
+  pesi tutti 0 o `total` non multiplo di `step` → `ValueError`.
+- `minimal_transfers(balances: Mapping[K, Decimal]) -> list[tuple[K, K, Decimal]]`: i trasferimenti `(chi paga, chi
+  riceve, importo)` che azzerano dei saldi (> 0 deve ricevere, < 0 deve dare), nel minor numero di passaggi: il
+  minimo è *n − g*, con *n* saldi non nulli e *g* il massimo numero di gruppi disgiunti a somma zero; ogni gruppo si
+  chiude accoppiando il debitore più grande con il creditore più grande. Esatto fino a `EXACT_TRANSFERS_LIMIT` (12)
+  saldi non nulli, oltre approssimato con l'accoppiamento greedy. Saldi che non sommano a zero → `ValueError`.
+
+```python
+minimal_transfers({"anna": Decimal("-700"), "bruno": Decimal("700")})
+# -> [("anna", "bruno", Decimal("700"))]
+```
 
 ### 4.10 `testing.runner` — Output leggibile dei test ✅
 
