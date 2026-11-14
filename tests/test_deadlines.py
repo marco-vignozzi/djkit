@@ -1,6 +1,6 @@
 """
-Tests for djkit.deadlines (Deadline, DeadlineRegistry), with providers
-defined here.
+Tests for djkit.deadlines (Deadline, DeadlineRegistry, urgency), with
+providers defined here.
 
 Run with: python manage.py test djkit.tests.test_deadlines
 """
@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from django.test import SimpleTestCase
 
-from djkit.deadlines import Deadline, DeadlineRegistry
+from djkit.deadlines import Deadline, DeadlineRegistry, urgency
 
 
 def sample_registry() -> DeadlineRegistry:
@@ -61,3 +61,34 @@ class DeadlineRegistryTests(SimpleTestCase):
             registry.provider("bad")(lambda user, start, end, wrong=wrong: [wrong])
             with self.subTest(wrong=wrong), self.assertRaises(ValueError):
                 registry.collect(None, date(2026, 6, 1), date(2026, 6, 30))
+
+
+class UrgencyTests(SimpleTestCase):
+    """urgency: the code of a deadline by how close it is."""
+
+    LEVELS = [(30, "month"), (7, "week")]
+    TODAY = date(2026, 6, 10)
+
+    def code(self, due: date) -> str | None:
+        """urgency of `due` on 10/6/2026 with week (7 days) and month (30 days) levels."""
+        return urgency(due, self.TODAY, self.LEVELS, overdue="late")
+
+    def test_levels_by_distance(self):
+        """9/6 late; 10/6 and 17/6 week; 18/6 and 10/7 month; 11/7 None."""
+        cases = {
+            date(2026, 6, 9): "late",
+            date(2026, 6, 10): "week",
+            date(2026, 6, 17): "week",
+            date(2026, 6, 18): "month",
+            date(2026, 7, 10): "month",
+            date(2026, 7, 11): None,
+        }
+        for due, expected in cases.items():
+            with self.subTest(due=due):
+                self.assertEqual(self.code(due), expected)
+
+    def test_invalid_levels_are_a_bug(self):
+        """Negative days, or two levels with the same days -> ValueError."""
+        for levels in ([(-1, "x")], [(7, "a"), (7, "b")]):
+            with self.subTest(levels=levels), self.assertRaises(ValueError):
+                urgency(self.TODAY, self.TODAY, levels, overdue="late")

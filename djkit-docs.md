@@ -463,8 +463,9 @@ customer.mark_deleted()                               # eliminazione logica
   subquery correlata con la somma di un campo, come `DecimalField(max_digits, decimal_places)`. Se non ci sono
   righe restituisce 0 con `decimal_places` decimali (`Decimal("0.00")`). Si usa in `annotate()`.
 - `count_subquery(queryset) -> Coalesce`: subquery correlata con il numero di righe, 0 se non ce ne sono.
-- `date_filter(field: str, as_of: date | None) -> Q`: restituisce `Q(field__lte=as_of)`, oppure `Q()` vuoto
-  se `as_of` è `None`.
+- `date_filter(field: str, as_of: date | Expression | OuterRef | None) -> Q`: restituisce `Q(field__lte=as_of)`,
+  oppure `Q()` vuoto se `as_of` è `None`. `as_of` può essere un'espressione, per una data che cambia da riga a riga
+  (es. `OuterRef("reference_date")` dentro una subquery correlata).
 - `ensure_unique(model, values: dict, exclude_pk=None, messages: dict | None = None) -> None`: controlla ogni campo
   di `values` (già normalizzato; i `None` sono saltati) e, se un'altra riga usa già quel valore, solleva
   `Conflict(errors={campo: [messaggio]})` con tutti i campi occupati; `detail` unisce i messaggi distinti.
@@ -517,6 +518,16 @@ def invoices_due(user, start, end):
             for i in Invoice.objects.accessible_by(user).filter(due_date__range=(start, end))]
 
 registry.collect(user, date(2026, 6, 1), date(2026, 6, 30))
+```
+
+- `urgency(due_date, today, levels, overdue) -> str | None`: quanto è vicina una scadenza, come codice scelto dal
+  progetto (es. per colorarla). `levels` sono coppie `(giorni, codice)`: vince il livello con meno giorni tale che
+  `due_date <= today + giorni`; una scadenza già passata riceve `overdue`; oltre tutti i livelli → `None`. Giorni
+  negativi o ripetuti → `ValueError`.
+
+```python
+urgency(date(2026, 6, 15), date(2026, 6, 10), [(7, "this_week"), (30, "this_month")], overdue="overdue")
+# -> "this_week"
 ```
 
 ### 4.8 `validators` e `it` — Dati personali ✅

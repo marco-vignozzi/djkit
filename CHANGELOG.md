@@ -3,6 +3,16 @@
 All notable changes to djkit. Versions follow semantic versioning
 (MAJOR: incompatible changes, MINOR: new features, PATCH: fixes).
 
+## [0.5.0] — unreleased
+
+### Added
+- `deadlines.urgency(due_date, today, levels, overdue)`: code of a deadline
+  by how close it is (e.g. overdue / this week / this month).
+
+### Changed
+- `db.date_filter` also accepts an expression or `OuterRef` as `as_of`, for
+  a reference date that changes from row to row.
+
 ## [0.4.0] — unreleased
 
 ### Added

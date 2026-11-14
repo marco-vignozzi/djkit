@@ -25,7 +25,7 @@ from decimal import Decimal
 from datetime import datetime
 
 from django.db import models
-from django.db.models import DecimalField, F, Func, IntegerField, Q, Subquery, Value
+from django.db.models import DecimalField, F, Func, IntegerField, OuterRef, Q, Subquery, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -111,13 +111,15 @@ def count_subquery(queryset: models.QuerySet) -> Coalesce:
     return Coalesce(Subquery(counted), Value(0), output_field=IntegerField())
 
 
-def date_filter(field: str, as_of: date | None) -> Q:
+def date_filter(field: str, as_of: "date | models.Expression | OuterRef | None") -> Q:
     """
     Restrict rows to those dated on or before a reference date.
 
     Args:
         field: name of the date field, e.g. "due_date".
-        as_of: reference date; None means "every date" (no restriction).
+        as_of: reference date; an expression or OuterRef for a date that
+            changes from row to row (e.g. OuterRef("reference_date") inside
+            a correlated subquery); None means "every date" (no restriction).
 
     Returns:
         Q(field__lte=as_of), or an empty Q when as_of is None.

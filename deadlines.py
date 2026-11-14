@@ -116,3 +116,34 @@ class DeadlineRegistry:
                     raise ValueError(f"Provider of {kind!r} returned {deadline!r}")
                 found.append(deadline)
         return sorted(found, key=lambda d: (d.due_date, d.kind, d.subject_id))
+
+
+def urgency(due_date: date, today: date, levels: Iterable[tuple[int, str]], overdue: str) -> str | None:
+    """
+    How urgent a deadline is, as a code chosen by the project (e.g. to color
+    it in the interface).
+
+    Args:
+        due_date: when the deadline falls.
+        today: reference date.
+        levels: (days, code) pairs: the deadline gets the code of the
+            smallest `days` such that due_date <= today + days, e.g.
+            [(7, "this_week"), (30, "this_month")].
+        overdue: code for a deadline already passed (due_date < today).
+
+    Returns:
+        overdue, the code of the first matching level, or None when the
+        deadline is further away than every level.
+
+    Raises:
+        ValueError: a level with negative days, or two levels with the same
+            days (a bug of the caller).
+    """
+    ordered = sorted(levels)
+    days_list = [days for days, _ in ordered]
+    if any(days < 0 for days in days_list) or len(set(days_list)) != len(days_list):
+        raise ValueError(f"Urgency levels need distinct days >= 0: {ordered}")
+    if due_date < today:
+        return overdue
+    remaining = (due_date - today).days
+    return next((code for days, code in ordered if remaining <= days), None)
