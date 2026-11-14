@@ -54,6 +54,8 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "string_type": "Enter a text.",
     "string_too_short": "Enter at least {min_length} characters.",
     "string_too_long": "Enter at most {max_length} characters.",
+    "list_too_short": "Enter at least {min_length} items.",
+    "list_too_long": "Enter at most {max_length} items.",
     "number_type": "Enter a valid number.",
     "boolean_type": "Enter true or false.",
     "date_type": "Enter a valid date (YYYY-MM-DD).",

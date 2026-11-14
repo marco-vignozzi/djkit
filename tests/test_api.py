@@ -204,6 +204,14 @@ class ValidationHelperTests(SimpleTestCase):
         )
         self.assertEqual(validation_message({"type": "something_new"}), "Invalid value.")
 
+    @override_settings(DJKIT_MESSAGES={})
+    def test_list_too_short_or_long_counts_items_not_characters(self):
+        """too_short min_length 1 -> 'Enter at least 1 items.'; too_long max_length 3 -> 'Enter at most 3 items.'."""
+        self.assertEqual(
+            validation_message({"type": "too_short", "ctx": {"min_length": 1}}), "Enter at least 1 items."
+        )
+        self.assertEqual(validation_message({"type": "too_long", "ctx": {"max_length": 3}}), "Enter at most 3 items.")
+
     def test_value_error_keeps_validator_message(self):
         """value_error with ctx error ValueError('Data di fine prima dell'inizio.') -> that text."""
         error = {"type": "value_error", "ctx": {"error": ValueError("Data di fine prima dell'inizio.")}}

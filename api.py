@@ -81,8 +81,9 @@ VALIDATION_MESSAGE_KEYS: dict[str, str] = {
     "string_type": "string_type",
     "string_too_short": "string_too_short",
     "string_too_long": "string_too_long",
-    "too_short": "string_too_short",
-    "too_long": "string_too_long",
+    # Lists (and other collections): items, not characters.
+    "too_short": "list_too_short",
+    "too_long": "list_too_long",
     "int_type": "number_type",
     "int_parsing": "number_type",
     "int_from_float": "number_type",

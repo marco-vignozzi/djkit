@@ -6,6 +6,10 @@ All notable changes to djkit. Versions follow semantic versioning
 ## [0.3.0] — unreleased
 
 ### Fixed
+- `api.validation_message`: a list that is too short or too long (Pydantic
+  `too_short` / `too_long`) now uses the new message keys `list_too_short`
+  and `list_too_long` ("Enter at least 1 items."), not the string ones
+  ("Enter at least 1 characters.").
 - `updates.apply_patch`: a value equal to the stored one but written
   differently (`Decimal("650")` for a stored 650.00) no longer appears in
   the returned diff; the diff lists only the fields really saved.

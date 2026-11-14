@@ -122,7 +122,8 @@ di `djkit` resta in inglese, ma nessun messaggio inglese arriva all'utente.
   - errori HTTP: `bad_request`, `unauthorized`, `forbidden`, `csrf_failed`, `method_not_allowed`,
     `too_many_requests`, `server_error`;
   - validazione degli schemi: `missing`, `invalid_value`, `invalid_json`, `string_type`, `string_too_short`
-    (`{min_length}`), `string_too_long` (`{max_length}`), `number_type`, `boolean_type`, `date_type`,
+    (`{min_length}`), `string_too_long` (`{max_length}`), `list_too_short` (`{min_length}`, elementi di un elenco),
+    `list_too_long` (`{max_length}`), `number_type`, `boolean_type`, `date_type`,
     `datetime_type`, `greater_than` (`{gt}`), `greater_than_equal` (`{ge}`), `less_than` (`{lt}`),
     `less_than_equal` (`{le}`), `max_digits` (`{max_digits}`), `decimal_places` (`{decimal_places}`), `choice`,
     `list_type`, `object_type`, `unknown_field` (campo non dichiarato dallo schema, vedi `InputSchema`).
