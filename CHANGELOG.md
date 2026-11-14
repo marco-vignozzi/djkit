@@ -5,16 +5,13 @@ All notable changes to djkit. Versions follow semantic versioning
 
 ## [0.3.0] — unreleased
 
-### Fixed
-- `api.validation_message`: a list that is too short or too long (Pydantic
-  `too_short` / `too_long`) now uses the new message keys `list_too_short`
-  and `list_too_long` ("Enter at least 1 items."), not the string ones
-  ("Enter at least 1 characters.").
-- `updates.apply_patch`: a value equal to the stored one but written
-  differently (`Decimal("650")` for a stored 650.00) no longer appears in
-  the returned diff; the diff lists only the fields really saved.
-
 ### Added
+- `texts` (new module): `TextCatalog` (nested texts with dotted keys,
+  plural leaves, loud errors on unknown keys or missing placeholders),
+  `catalog_response` (JSON with ETag / 304), `typescript_keys`; command
+  `export_text_types`; settings `DJKIT_TEXT_CATALOG`,
+  `DJKIT_TEXT_PUBLIC_SECTIONS`.
+- `messages`: key `tax_code_invalid`.
 - `errors`: `InvalidData.from_validation_error(error, field_prefix="")`
   names the fields of an object nested in the request body
   ("customer.email"); helper `prefixed_field`.
@@ -37,6 +34,19 @@ All notable changes to djkit. Versions follow semantic versioning
 - `auth`: password reset by link, `password_reset_token`,
   `user_for_password_reset`, `reset_password` (message key
   `password_reset_invalid`).
+
+### Changed
+- `it.validate_tax_code`: its message comes from the key
+  `tax_code_invalid` (it was an Italian sentence written in djkit).
+
+### Fixed
+- `api.validation_message`: a list that is too short or too long (Pydantic
+  `too_short` / `too_long`) now uses the new message keys `list_too_short`
+  and `list_too_long` ("Enter at least 1 items."), not the string ones
+  ("Enter at least 1 characters.").
+- `updates.apply_patch`: a value equal to the stored one but written
+  differently (`Decimal("650")` for a stored 650.00) no longer appears in
+  the returned diff; the diff lists only the fields really saved.
 
 ## [0.2.0] — unreleased
 

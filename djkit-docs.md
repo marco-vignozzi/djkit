@@ -64,6 +64,8 @@ djkit/
 ├── it.py                # dati italiani: codice fiscale
 ├── mail.py              # invio email (testi da template) con modalità demo
 ├── numbers.py           # divisione di un totale in parti uguali
+├── texts.py             # catalogo dei testi per chiave, servito al frontend con ETag, chiavi esportate in TypeScript
+├── management/commands/export_text_types.py   # comando che scrive le chiavi del catalogo in un file .ts
 ├── testing/
 │   ├── runner.py        # VerboseTestRunner: output leggibile dei test
 │   └── api.py           # helper per i test delle API
@@ -72,7 +74,8 @@ djkit/
 
 Dipendenze interne: `errors` → `messages`; `api` → `errors`, `messages`; `views` → `messages`;
 `access` → `errors`; `auth` → `errors`, `messages`; `db` → `errors`, `messages`; `audit` → `fields`, `messages`;
-`updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`). Tutti gli altri moduli sono indipendenti tra loro.
+`updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`); `it` → `messages`; il comando `export_text_types` →
+`texts`. Tutti gli altri moduli sono indipendenti tra loro.
 
 `djkit` non ha un modulo `models`: i modelli astratti (`audit.AuditEntryBase`) si importano dal loro modulo e
 vanno usati solo durante il caricamento dei modelli del progetto (cioè dentro il suo `models.py`).
@@ -126,7 +129,8 @@ di `djkit` resta in inglese, ma nessun messaggio inglese arriva all'utente.
     `list_too_long` (`{max_length}`), `number_type`, `boolean_type`, `date_type`,
     `datetime_type`, `greater_than` (`{gt}`), `greater_than_equal` (`{ge}`), `less_than` (`{lt}`),
     `less_than_equal` (`{le}`), `max_digits` (`{max_digits}`), `decimal_places` (`{decimal_places}`), `choice`,
-    `list_type`, `object_type`, `unknown_field` (campo non dichiarato dallo schema, vedi `InputSchema`).
+    `list_type`, `object_type`, `unknown_field` (campo non dichiarato dallo schema, vedi `InputSchema`);
+  - `it`: `tax_code_invalid` (`{length}`).
 - `get_message(key: str, **params) -> str`: testo del progetto (`DJKIT_MESSAGES`) o quello inglese, con i
   segnaposto `{nome}` riempiti (`str.format`); se manca il valore di un segnaposto restituisce il testo così com'è.
   Chiave sconosciuta → `KeyError`. Accetta anche chiavi definite solo dal progetto in `DJKIT_MESSAGES`.
@@ -490,7 +494,7 @@ Funzioni pure, senza database.
   `None` resta `None`.
 - `it.TAX_CODE_LENGTH = 16`
 - `it.validate_tax_code`: `RegexValidator` che accetta esattamente 16 lettere maiuscole o cifre
-  (codice `invalid_tax_code`).
+  (codice `invalid_tax_code`). Il messaggio è la chiave `tax_code_invalid` (`{length}`), letta quando viene mostrato.
 - `it.normalize_tax_code(value: str | None) -> str | None`: toglie gli spazi e converte in maiuscolo.
 
 ### 4.9 `mail` — Invio email ✅
@@ -516,6 +520,35 @@ in sviluppo, SMTP in produzione; nei test Django usa la memoria e le email finis
 ```python
 subject, body = render_email("shop/emails/welcome", {"user": user})
 send_email([user.email], subject, body, reply_to=[shop.owner_email])
+```
+
+### 4.9a `texts` — Catalogo dei testi ✅
+
+Per i progetti che vogliono **tutti** i testi dell'interfaccia (messaggi dell'API, etichette dei valori, testi delle
+pagine del frontend) in un unico posto, usati solo per chiave. I messaggi propri di `djkit` restano in `messages`.
+
+- `TextCatalog(data: dict)`: catalogo annidato con chiavi a punti. Ogni foglia è un testo oppure un plurale
+  `{"one": "...", "other": "..."}`; qualunque altra foglia (numero, gruppo vuoto) → `TypeError` quando il catalogo
+  viene creato.
+  - `text(key, **params) -> str`: il testo con i segnaposto `{nome}` riempiti. Un plurale sceglie la forma con
+    `count` (1 → `one`, altrimenti `other`). Chiave inesistente → `UnknownTextKey`; segnaposto senza valore (o
+    plurale senza `count`) → `MissingTextParameter`. Mai un testo vuoto.
+  - `keys(sections=None) -> list[str]`: tutte le chiavi, ordinate (per i test di completezza e per i tipi).
+  - `section(name) -> dict`, `public_data(sections=None) -> dict`: le sezioni per il frontend più `version`, un hash
+    breve del contenuto.
+- `catalog_response(request, data) -> HttpResponse`: JSON con `ETag` e `Cache-Control: no-cache`; con un
+  `If-None-Match` uguale risponde 304 senza corpo.
+- `typescript_keys(catalog, sections=None) -> str`: modulo TypeScript con `type TextKey` (unione delle chiavi) e
+  `TEXT_KEYS`, così un frontend che usa una chiave inesistente non compila.
+- `project_catalog()`, `public_sections()`, `content_hash(data)`, `placeholders(text)`, `is_plural(value)`.
+- Comando `manage.py export_text_types [--output file.ts]`: scrive (o stampa) il modulo di `typescript_keys`.
+- Setting: `DJKIT_TEXT_CATALOG` (percorso dell'istanza `TextCatalog` del progetto), `DJKIT_TEXT_PUBLIC_SECTIONS`
+  (sezioni inviate al frontend ed esportate, default `["ui", "value"]`).
+
+```python
+CATALOG = TextCatalog({"api": {"order": {"not_found": "Ordine non trovato."}},
+                       "ui": {"cart": {"items": {"one": "{count} articolo", "other": "{count} articoli"}}}})
+CATALOG.text("ui.cart.items", count=3)    # "3 articoli"
 ```
 
 ### 4.9b `numbers` — Numeri ✅

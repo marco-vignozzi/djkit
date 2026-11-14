@@ -6,6 +6,13 @@ schemas, so a tax code is validated identically everywhere.
 """
 
 from django.core.validators import RegexValidator
+from django.utils.functional import lazy
+
+from .messages import get_message
+
+# The message is looked up when shown, so the project's text applies
+# (message key "tax_code_invalid").
+_lazy_message = lazy(get_message, str)
 
 # Length of an Italian tax code ("codice fiscale").
 TAX_CODE_LENGTH = 16
@@ -14,7 +21,7 @@ TAX_CODE_LENGTH = 16
 # uppercase before being validated, see normalize_tax_code).
 validate_tax_code = RegexValidator(
     regex=rf"^[A-Z0-9]{{{TAX_CODE_LENGTH}}}$",
-    message=f"Il codice fiscale deve contenere {TAX_CODE_LENGTH} lettere o cifre.",
+    message=_lazy_message("tax_code_invalid", length=TAX_CODE_LENGTH),
     code="invalid_tax_code",
 )
 

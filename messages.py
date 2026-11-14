@@ -55,6 +55,8 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "string_too_short": "Enter at least {min_length} characters.",
     "string_too_long": "Enter at most {max_length} characters.",
     "list_too_short": "Enter at least {min_length} items.",
+    # it.validate_tax_code
+    "tax_code_invalid": "The tax code must contain {length} letters or digits.",
     "list_too_long": "Enter at most {max_length} items.",
     "number_type": "Enter a valid number.",
     "boolean_type": "Enter true or false.",
