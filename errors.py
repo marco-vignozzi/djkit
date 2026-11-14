@@ -13,7 +13,7 @@ djkit.messages (English by default, the project's language through the
 DJKIT_MESSAGES setting).
 """
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 
 from .messages import get_message
 
@@ -79,20 +79,28 @@ class InvalidData(DomainError):
     message_key = "invalid_data"
 
     @classmethod
-    def from_validation_error(cls, error: ValidationError) -> "InvalidData":
+    def from_validation_error(cls, error: ValidationError, field_prefix: str = "") -> "InvalidData":
         """
         Convert a Django ValidationError (from full_clean, a validator, ...).
 
         Args:
             error: the ValidationError.
+            field_prefix: prefix of the field names, for an object that is
+                part of a larger request body (e.g. "customer." ->
+                "customer.email"); its non-field messages go under the
+                prefix without the final dot ("customer"). "" keeps the
+                names as they are.
 
         Returns:
             InvalidData with `errors={"field": [messages]}` when the error is
-            tied to fields (non-field messages under "__all__"), otherwise
-            with the messages joined in `detail`.
+            tied to fields (non-field messages under "__all__", or under the
+            prefix), otherwise with the messages joined in `detail`.
         """
         if hasattr(error, "error_dict"):
-            errors = {field: [str(message) for message in messages] for field, messages in error.message_dict.items()}
+            errors = {
+                prefixed_field(field, field_prefix): [str(message) for message in messages]
+                for field, messages in error.message_dict.items()
+            }
             return cls(errors=errors)
         return cls(" ".join(str(message) for message in error.messages) or None)
 
@@ -139,3 +147,22 @@ def require_confirmation(given: int, required: int, impact: dict, detail: str | 
     """
     if given < required:
         raise ConfirmationRequired(impact=impact, required=required, given=given, detail=detail)
+
+
+def prefixed_field(field: str, prefix: str) -> str:
+    """
+    Name of a field of an object nested in a request body.
+
+    Args:
+        field: the field name, or NON_FIELD_ERRORS ("__all__").
+        prefix: e.g. "customer."; "" for no prefix.
+
+    Returns:
+        "customer.email" for a field; "customer" for NON_FIELD_ERRORS (or
+        "__all__" again when there is no prefix).
+    """
+    if not prefix:
+        return field
+    if field == NON_FIELD_ERRORS:
+        return prefix.rstrip(".")
+    return f"{prefix}{field}"

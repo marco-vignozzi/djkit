@@ -63,6 +63,13 @@ class FromValidationErrorTests(SimpleTestCase):
         error = InvalidData.from_validation_error(ValidationError({"amount": ["Must be positive."]}))
         self.assertEqual(error.payload(), {"detail": "Invalid data.", "errors": {"amount": ["Must be positive."]}})
 
+    def test_field_prefix_names_nested_fields(self):
+        """Prefix 'customer.': 'email' -> 'customer.email', '__all__' -> 'customer'."""
+        error = InvalidData.from_validation_error(
+            ValidationError({"email": ["Bad."], "__all__": ["Wrong."]}), field_prefix="customer."
+        )
+        self.assertEqual(error.payload()["errors"], {"customer.email": ["Bad."], "customer": ["Wrong."]})
+
     def test_plain_messages_become_detail(self):
         """ValidationError(['A.', 'B.']) -> detail 'A. B.'."""
         error = InvalidData.from_validation_error(ValidationError(["A.", "B."]))

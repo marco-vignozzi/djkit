@@ -6,6 +6,11 @@ All notable changes to djkit. Versions follow semantic versioning
 ## [0.3.0] — unreleased
 
 ### Added
+- `errors`: `InvalidData.from_validation_error(error, field_prefix="")`
+  names the fields of an object nested in the request body
+  ("customer.email"); helper `prefixed_field`.
+- `validators.strip_text_values`: removes the spaces around the text
+  values of a request before model validation.
 - `mail` (new module): `render_email` (subject and body from two
   templates), `send_email` (plain-text email through `django.core.mail`,
   errors raised to the caller), `demo_mode`, `ReadableConsoleBackend` (development backend printing

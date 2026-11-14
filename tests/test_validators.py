@@ -10,7 +10,7 @@ from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
 from djkit.it import TAX_CODE_LENGTH, normalize_tax_code, validate_tax_code
-from djkit.validators import normalize_email_address
+from djkit.validators import normalize_email_address, strip_text_values
 
 
 class NormalizeEmailAddressTests(SimpleTestCase):
@@ -23,6 +23,21 @@ class NormalizeEmailAddressTests(SimpleTestCase):
     def test_none_stays_none(self):
         """None is returned unchanged (optional fields)."""
         self.assertIsNone(normalize_email_address(None))
+
+
+class StripTextValuesTests(SimpleTestCase):
+    """strip_text_values removes the spaces around text values only."""
+
+    def test_text_values_are_stripped_and_others_kept(self):
+        """{"city": "  Rome ", "blank": "   ", "count": 3, "note": None} -> "Rome", "", 3, None."""
+        data = {"city": "  Rome ", "blank": "   ", "count": 3, "note": None}
+        self.assertEqual(strip_text_values(data), {"city": "Rome", "blank": "", "count": 3, "note": None})
+
+    def test_input_is_not_changed(self):
+        """The dict passed in keeps its original values."""
+        data = {"city": " Rome "}
+        strip_text_values(data)
+        self.assertEqual(data, {"city": " Rome "})
 
 
 class TaxCodeTests(SimpleTestCase):

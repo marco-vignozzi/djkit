@@ -60,7 +60,7 @@ djkit/
 ├── access.py            # lettura di un oggetto accessibile all'utente, o 404
 ├── db.py                # QuerySet con filtro di accesso, eliminazione logica, subquery, controllo di unicità
 ├── dates.py             # date mensili e scadenze
-├── validators.py        # normalizzazione di dati personali generici
+├── validators.py        # normalizzazione di dati personali generici e dei testi in ingresso
 ├── it.py                # dati italiani: codice fiscale
 ├── mail.py              # invio email (testi da template) con modalità demo
 ├── numbers.py           # divisione di un totale in parti uguali
@@ -160,8 +160,11 @@ I service sollevano queste eccezioni senza conoscere HTTP. Le traduce in rispost
   (dati aggiuntivi per il corpo della risposta; i valori `None` vengono scartati).
   `payload() -> dict` restituisce `{"detail": ..., **extra}`.
 - `InvalidData(detail=None, errors={"campo": ["messaggio", ...]})`: errori legati ai campi.
-- `InvalidData.from_validation_error(error) -> InvalidData`: converte una `ValidationError` di Django.
+- `InvalidData.from_validation_error(error, field_prefix="") -> InvalidData`: converte una `ValidationError` di Django.
   Gli errori dei campi finiscono in `errors` (quelli generali sotto `"__all__"`), gli altri messaggi in `detail`.
+  Con `field_prefix` (oggetto annidato nel corpo della richiesta, es. `"customer."`) i campi diventano
+  `"customer.email"` e gli errori generali finiscono sotto `"customer"`.
+- `prefixed_field(field, prefix) -> str`: il nome di campo usato da `from_validation_error` con un prefisso.
 - `require_confirmation(given: int, required: int, impact: dict, detail: str | None = None) -> None`: solleva
   `ConfirmationRequired` se `given < required`, altrimenti non fa nulla. `impact` riassume cosa verrebbe perso,
   per esempio `{"orders": 3, "invoices": 12}`.
@@ -480,6 +483,8 @@ Funzioni pure, senza database.
 ### 4.8 `validators` e `it` — Dati personali ✅
 
 - `validators.normalize_email_address(value: str | None) -> str | None`: toglie gli spazi e converte in minuscolo.
+- `validators.strip_text_values(data: dict) -> dict`: copia di `data` con gli spazi tolti attorno a ogni valore
+  di testo, prima della validazione del modello: `"   "` diventa `""` e viene rifiutato da un campo obbligatorio.
   `None` resta `None`.
 - `it.TAX_CODE_LENGTH = 16`
 - `it.validate_tax_code`: `RegexValidator` che accetta esattamente 16 lettere maiuscole o cifre
