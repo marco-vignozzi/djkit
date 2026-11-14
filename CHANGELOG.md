@@ -5,6 +5,11 @@ All notable changes to djkit. Versions follow semantic versioning
 
 ## [0.3.0] — unreleased
 
+### Fixed
+- `updates.apply_patch`: a value equal to the stored one but written
+  differently (`Decimal("650")` for a stored 650.00) no longer appears in
+  the returned diff; the diff lists only the fields really saved.
+
 ### Added
 - `errors`: `InvalidData.from_validation_error(error, field_prefix="")`
   names the fields of an object nested in the request body

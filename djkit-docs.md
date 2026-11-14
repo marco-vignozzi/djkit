@@ -362,8 +362,9 @@ log_write(AuditLogEntry, request.user, AuditAction.UPDATE, invoice, changes, tea
   3. Esegue `full_clean()`, che controlla validatori, choices, unicità e `clean()` del modello. Un errore
      solleva `InvalidData` e non salva nulla.
   4. Salva solo i campi cambiati, con `save(update_fields=...)`.
-  5. Restituisce il `diff` (senza i campi esclusi dal registro), pronto per `log_write`. Restituisce `{}` se
-     non è cambiato nulla.
+  5. Restituisce il `diff` dei soli campi salvati (senza i campi esclusi dal registro), pronto per
+     `log_write`. Restituisce `{}` se non è cambiato nulla. Un valore uguale a quello salvato ma scritto in
+     un altro modo (`Decimal("650")` per un 650.00 salvato) non conta come modifica.
 
 ### 4.5 `access` — Oggetti accessibili ✅
 

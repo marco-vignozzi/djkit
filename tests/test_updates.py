@@ -1,11 +1,17 @@
 """
-Tests for djkit.updates (apply_patch), on Django's own auth models.
+Tests for djkit.updates (apply_patch), on Django's own auth models and on
+PricedTestItem, a concrete model defined only for these tests (app_label
+"djkit"; its table is created in setUpClass, like SoftDeleteTestItem in
+test_soft_delete).
 
 Run with: python manage.py test djkit.tests.test_updates
 """
 
+from decimal import Decimal
+
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
+from django.db import connection, models
 from django.test import TestCase
 
 from djkit.errors import InvalidData
@@ -68,3 +74,38 @@ class ApplyPatchTests(TestCase):
         Group.objects.create(name="blue")
         with self.assertRaises(InvalidData):
             apply_patch(self.group, {"name": "blue"})
+
+
+class PricedTestItem(models.Model):
+    """Concrete row with a decimal field, used only by these tests."""
+
+    name = models.CharField(max_length=20)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+
+    class Meta:
+        app_label = "djkit"
+
+
+class ApplyPatchDecimalTests(TestCase):
+    """A decimal equal to the stored one but written differently is not a change."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Create the table of PricedTestItem (removed by the class rollback)."""
+        super().setUpClass()
+        with connection.schema_editor() as editor:
+            editor.create_model(PricedTestItem)
+
+    def setUp(self):
+        """An item 'lamp' at 650.00, read back from the database."""
+        self.item = PricedTestItem.objects.create(name="lamp", price=Decimal("650"))
+        self.item.refresh_from_db()
+
+    def test_same_decimal_written_differently_gives_empty_diff(self):
+        """price 650 on a stored 650.00 -> {} (nothing to log)."""
+        self.assertEqual(apply_patch(self.item, {"price": Decimal("650")}), {})
+
+    def test_diff_lists_only_the_fields_really_changed(self):
+        """price 650 and name 'desk' -> diff {'name': ['lamp', 'desk']} only."""
+        changes = apply_patch(self.item, {"price": Decimal("650"), "name": "desk"})
+        self.assertEqual(changes, {"name": ["lamp", "desk"]})

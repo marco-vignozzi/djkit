@@ -30,7 +30,9 @@ def apply_patch(obj: models.Model, data: dict, allowed: set[str] | None = None) 
     Returns:
         The diff {"attname": [old, new]} of the changed fields, without the
         excluded fields of djkit.audit (e.g. "password"); {} when nothing
-        changed (nothing is saved then).
+        changed (nothing is saved then). A value equal to the current one
+        but written differently (Decimal("650") for a stored 650.00) is
+        not a change.
 
     Raises:
         InvalidData: unknown or not allowed field (errors keyed by field),
@@ -66,6 +68,10 @@ def apply_patch(obj: models.Model, data: dict, allowed: set[str] | None = None) 
         raise InvalidData.from_validation_error(error) from error
 
     changed = [field.attname for name, field in fields.items() if getattr(obj, field.attname) != raw_before[name]]
-    if changed:
-        obj.save(update_fields=changed)
-    return diff(before, snapshot(obj))
+    if not changed:
+        return {}
+    obj.save(update_fields=changed)
+    # Only the fields whose value really changed: an equal value written
+    # differently (Decimal("650") for a stored 650.00) is not a change,
+    # although its JSON form differs.
+    return {key: values for key, values in diff(before, snapshot(obj)).items() if key in changed}
