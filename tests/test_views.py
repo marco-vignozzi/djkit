@@ -54,3 +54,21 @@ class CsrfFailureViewTests(ApiTestCase):
         response = client.post("/api/public/protected-echo", {"name": "Anna"})
         self.assertStatus(response, 403)
         self.assertEqual(response.json(), {"detail": "Ricarica la pagina."})
+
+
+@override_settings(ROOT_URLCONF="djkit.tests.urls", DJKIT_MESSAGES=TEST_MESSAGES, DEBUG=True)
+class ApiCatchAllTests(ApiTestCase):
+    """page_not_found as the catch-all after the API: JSON 404 under /api/ even with DEBUG on."""
+
+    def test_unknown_api_path_is_json_404_with_debug_on(self):
+        """GET and POST /api/public/missing (no endpoint) -> 404 {'detail': 'Non trovato.'}, not Django's HTML page."""
+        client = self.client_for()
+        for response in (client.get("/api/public/missing"), client.post("/api/public/missing/42", {})):
+            with self.subTest(path=response.request["PATH_INFO"]):
+                self.assertStatus(response, 404)
+                self.assertEqual(response["Content-Type"], "application/json")
+                self.assertEqual(response.json(), {"detail": "Non trovato."})
+
+    def test_existing_endpoints_are_not_caught(self):
+        """GET /api/public/conflict still reaches its endpoint (409)."""
+        self.assertStatus(self.client_for().get("/api/public/conflict"), 409)

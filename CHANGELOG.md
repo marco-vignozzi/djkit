@@ -11,6 +11,10 @@ All notable changes to djkit. Versions follow semantic versioning
 - `numbers.minimal_transfers(balances)`: the fewest transfers that bring
   balances adding up to zero to zero.
 
+### Documentation
+- `views.page_not_found` as the catch-all route after the API: a JSON 404
+  for unknown API paths with DEBUG on too.
+
 ## [0.5.0] — unreleased
 
 ### Added

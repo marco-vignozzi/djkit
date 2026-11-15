@@ -16,7 +16,11 @@ the texts of djkit.messages.
     handler404 = "djkit.views.page_not_found"
     handler500 = "djkit.views.server_error"
 
-With DEBUG on, Django keeps showing its technical 404 / 500 pages.
+With DEBUG on, Django keeps showing its technical 404 / 500 pages. To get
+the JSON 404 under an API prefix in every mode, add `page_not_found` as a
+catch-all route after the API (a path no API route matches ends there):
+
+    urlpatterns = [path("api/", api.urls), re_path(r"^api/", page_not_found)]
 """
 
 from django.http import JsonResponse

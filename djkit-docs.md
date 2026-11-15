@@ -250,7 +250,13 @@ CSRF_FAILURE_VIEW = "djkit.views.csrf_failure"
 handler404 = "djkit.views.page_not_found"   # e così handler400, handler403, handler500
 ```
 
-Con `DEBUG` attivo Django continua a mostrare le sue pagine tecniche di 404 e 500.
+Con `DEBUG` attivo Django continua a mostrare le sue pagine tecniche di 404 e 500. Per avere il 404 in JSON sotto
+il prefisso dell'API in ogni modalità, si aggiunge `page_not_found` come rotta finale dopo l'API (ci arriva solo un
+indirizzo che nessun endpoint riconosce):
+
+```python
+urlpatterns = [path("api/", api.urls), re_path(r"^api/", page_not_found)]
+```
 
 ### 4.2b `auth` — Password e login a sessione ✅
 

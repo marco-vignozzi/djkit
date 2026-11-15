@@ -8,11 +8,12 @@ each endpoint raises one kind of error or echoes the request.
 
 from django.core.exceptions import ValidationError
 from django.http import Http404
-from django.urls import path
+from django.urls import path, re_path
 from ninja import Field, NinjaAPI, Schema
 from ninja.security import django_auth
 
 from djkit.api import ConfirmationIn, InputSchema, csrf_protected, register_error_handlers, sets_csrf_cookie
+from djkit import views
 from djkit.auth import login_with_password
 from djkit.errors import Conflict, DomainError, InvalidData, NotFound, require_confirmation
 
@@ -122,4 +123,5 @@ def http404(request):
     raise Http404("Technical message never shown.")
 
 
-urlpatterns = [path("api/", api.urls)]
+# Catch-all after the API: unknown paths under /api/ answer the JSON 404.
+urlpatterns = [path("api/", api.urls), re_path(r"^api/", views.page_not_found)]
