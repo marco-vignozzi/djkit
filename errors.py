@@ -4,7 +4,7 @@ Domain exceptions and confirmation of destructive operations.
 Services raise these exceptions without knowing anything about HTTP;
 djkit.api.register_error_handlers translates them into responses
 (NotFound -> 404, Conflict -> 409, InvalidData -> 422,
-ConfirmationRequired -> 428).
+ConfirmationRequired -> 428, TooManyRequests -> 429).
 
 Every exception carries a user-facing `detail` message and optional extra
 data that ends up in the response body next to it (see payload()). When no
@@ -129,6 +129,28 @@ class ConfirmationRequired(DomainError):
         self.impact = impact
         self.required = required
         self.given = given
+
+
+class TooManyRequests(DomainError):
+    """
+    The same operation was repeated too soon (e.g. a second email to the
+    same recipient within the cooldown, see djkit.audit.ensure_cooldown).
+
+    The response carries `retry_at` (ISO timestamp): from then on the
+    operation is allowed again, so the client can say when to retry.
+    """
+
+    message_key = "too_many_requests"
+
+    def __init__(self, retry_at, detail: str | None = None):
+        """
+        Args:
+            retry_at: aware datetime from which the operation is allowed.
+            detail: user-facing message; the text of message_key when
+                omitted.
+        """
+        super().__init__(detail, retry_at=retry_at.isoformat())
+        self.retry_at = retry_at
 
 
 def require_confirmation(given: int, required: int, impact: dict, detail: str | None = None) -> None:

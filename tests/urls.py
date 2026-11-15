@@ -6,6 +6,8 @@ A small NinjaAPI with session authentication and the djkit error handlers:
 each endpoint raises one kind of error or echoes the request.
 """
 
+import datetime
+
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.urls import path, re_path
@@ -15,7 +17,7 @@ from ninja.security import django_auth
 from djkit.api import ConfirmationIn, InputSchema, csrf_protected, register_error_handlers, sets_csrf_cookie
 from djkit import views
 from djkit.auth import login_with_password
-from djkit.errors import Conflict, DomainError, InvalidData, NotFound, require_confirmation
+from djkit.errors import Conflict, DomainError, InvalidData, NotFound, TooManyRequests, require_confirmation
 
 
 class PaymentRequired(DomainError):
@@ -56,6 +58,12 @@ def not_found(request):
 def conflict(request):
     """Always 409 with the default message."""
     raise Conflict()
+
+
+@api.get("/public/too-many", auth=None)
+def too_many(request):
+    """Always 429: a send within the cooldown, allowed again at 12:00 UTC of 1/1/2030."""
+    raise TooManyRequests(datetime.datetime(2030, 1, 1, 12, tzinfo=datetime.UTC))
 
 
 @api.get("/public/invalid", auth=None)

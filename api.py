@@ -38,7 +38,7 @@ from ninja import errors as ninja_errors
 from ninja.decorators import decorate_view
 from pydantic import ConfigDict
 
-from .errors import Conflict, ConfirmationRequired, DomainError, InvalidData, NotFound
+from .errors import Conflict, ConfirmationRequired, DomainError, InvalidData, NotFound, TooManyRequests
 from .messages import get_message
 
 # Default HTTP status of each domain exception. Subclasses inherit the status
@@ -49,6 +49,7 @@ DEFAULT_STATUS_CODES: dict[type[DomainError], int] = {
     Conflict: 409,
     InvalidData: 422,
     ConfirmationRequired: 428,
+    TooManyRequests: 429,
 }
 
 
@@ -148,6 +149,8 @@ class ErrorOut(Schema):
         impact   -> what a destructive operation would remove (428).
         required -> confirmations needed (428).
         given    -> confirmations received (428).
+        retry_at -> from when the operation is allowed again (429 of
+                    TooManyRequests; ISO timestamp).
     """
 
     detail: str
@@ -155,6 +158,7 @@ class ErrorOut(Schema):
     impact: dict | None = None
     required: int | None = None
     given: int | None = None
+    retry_at: str | None = None
 
 
 class InputSchema(Schema):

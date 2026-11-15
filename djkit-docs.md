@@ -93,6 +93,7 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 
 | Setting | Default | Usato da | Significato | Stato |
 |---|---|---|---|---|
+| `DJKIT_COOLDOWN_SECONDS` | `60` | `audit` | secondi minimi tra due invii verso l'esterno a proposito dello stesso oggetto (`ensure_cooldown`, `cooldown_until`); `0` = nessun blocco, negativo → `ImproperlyConfigured` | ✅ |
 | `DJKIT_TEST_EXCLUDED_DIRS` | `{"tests", "migrations", ".venv", "venv", "site-packages"}` | `testing.runner` | parti di percorso mai mostrate come "codice sotto test"; il valore **sostituisce** il default. Le cartelle del modulo settings (da `SETTINGS_MODULE`, es. `config` per `config.settings`) sono sempre escluse in aggiunta | ✅ |
 | `DJKIT_TEST_EXCLUDED_FILES` | `{"tests.py", "factories.py", "apps.py", "admin.py", "__init__.py"}` | `testing.runner` | nomi di file mai mostrati come "codice sotto test"; il valore **sostituisce** il default | ✅ |
 | `DJKIT_TEST_PASSWORD_HASHERS` | `("django.contrib.auth.hashers.MD5PasswordHasher",)` | `testing.runner` | `PASSWORD_HASHERS` usati **solo durante i test**, al posto di quelli del progetto (lenti apposta: PBKDF2 impiega circa 0,5 s per hash). `None` lascia quelli del progetto | ✅ |
@@ -160,6 +161,7 @@ I service sollevano queste eccezioni senza conoscere HTTP. Le traduce in rispost
 | `Conflict` | 409 | `conflict` (`Conflict with the current state.`) | conflitto con lo stato attuale (valore già usato, oggetto in sola lettura, ...) |
 | `InvalidData` | 422 | `invalid_data` (`Invalid data.`) | violazione di una regola non coperta dalla validazione dello schema |
 | `ConfirmationRequired(impact, required, given, detail=None)` | 428 | `confirmation_required` (`Confirmation required.`) | operazione distruttiva non ancora confermata abbastanza volte |
+| `TooManyRequests(retry_at, detail=None)` | 429 | `too_many_requests` (`Too many requests: try again later.`) | la stessa operazione ripetuta troppo presto (es. un secondo invio dentro il blocco di `audit.ensure_cooldown`); nel corpo `retry_at` (ISO) dice da quando si può riprovare |
 
 - Ogni eccezione ha `detail` (messaggio per l'utente; se manca, `get_message(message_key)` della classe, quindi
   il testo di `DJKIT_MESSAGES` se il progetto lo fornisce) ed `extra`
@@ -312,12 +314,17 @@ un account: è compito del progetto.
 
 ### 4.3 `audit` — Registro delle operazioni ✅
 
-- `AuditAction`: valori ammessi di `action` (`CREATE`, `UPDATE`, `DELETE`).
+- `AuditAction`: valori ammessi di `action` (`CREATE`, `UPDATE`, `DELETE`, `NOTIFY`). `NOTIFY` registra un messaggio
+  inviato a proposito di una riga (per esempio un'email di sollecito): la riga non cambia, ma gli utenti vogliono sapere
+  che è stato inviato.
+- `ActorKind`: chi ha scritto la voce, `USER` (un utente) o `BATCH` (un'attività automatica, per esempio un comando
+  lanciato ogni giorno, che non ha un utente).
 - `AuditEntryBase` (modello **astratto**):
 
   | Campo | Tipo | Significato |
   |---|---|---|
-  | `actor` | FK a `AUTH_USER_MODEL`, `SET_NULL`, `related_name="%(app_label)s_%(class)s_entries"` | chi ha fatto la modifica |
+  | `actor` | FK a `AUTH_USER_MODEL`, `SET_NULL`, `related_name="%(app_label)s_%(class)s_entries"` | chi ha fatto la modifica (`None` se l'utente è stato eliminato; sempre `None` per `BATCH`) |
+  | `actor_kind` | `choice_field(ActorKind)`, default `USER` | utente o attività automatica |
   | `action` | `choice_field(AuditAction)` | tipo di operazione |
   | `model` | `CharField(100)` | nome del modello modificato |
   | `object_id` | `PositiveBigIntegerField`, null | chiave dell'oggetto |
@@ -325,9 +332,10 @@ un account: è compito del progetto.
   | `changes` | `JSONField` | `{"campo": [vecchio, nuovo]}` oppure la `snapshot` |
   | `timestamp` | `DateTimeField(auto_now_add)` | quando |
 
-  Nel `Meta` sono definiti: ordinamento dal più recente, `verbose_name` "audit log entry" e il vincolo CHECK
-  `"<app>_<classe>_action_valid"`. Se la sottoclasse ridefinisce `Meta.constraints`, deve rimettere il vincolo con
-  `AuditEntryBase.action_constraint(name)`.
+  Nel `Meta` sono definiti: ordinamento dal più recente, `verbose_name` "audit log entry" e i vincoli CHECK
+  `"<app>_<classe>_action_valid"`, `"<app>_<classe>_actor_kind_valid"` e `"<app>_<classe>_batch_without_actor"` (una
+  voce `BATCH` non ha `actor`). Se la sottoclasse ridefinisce `Meta.constraints`, deve rimetterli con
+  `AuditEntryBase.action_constraint(name)` e `*AuditEntryBase.actor_kind_constraints(prefix)`.
 
   Il `related_name` di `actor` è diverso per ogni sottoclasse: per `shop.OrderLog` vale
   `user.shop_orderlog_entries`. Così un progetto può avere più modelli concreti di registro senza conflitti
@@ -340,10 +348,41 @@ class AuditLogEntry(AuditEntryBase):
 log_write(AuditLogEntry, request.user, AuditAction.UPDATE, invoice, changes, team_id=invoice.team_id)
 ```
 
-- `log_write(entry_model, actor, action, obj, changes=None, **context) -> AuditEntryBase`: crea una voce del
-  registro e va chiamata dentro la stessa transazione della scrittura. Per `DELETE` va chiamata **prima**
-  di `obj.delete()`.
-  - Se `changes` è `None`, salva la `snapshot` completa per `CREATE` e `DELETE` e `{}` per `UPDATE`.
+- `log_write(entry_model, actor, action, obj, changes=None, *, actor_kind=ActorKind.USER, **context) -> AuditEntryBase`:
+  crea una voce del registro e va chiamata dentro la stessa transazione della scrittura. Per `DELETE` va chiamata
+  **prima** di `obj.delete()`.
+  - Se `changes` è `None`, salva la `snapshot` completa per `CREATE` e `DELETE` e `{}` per `UPDATE` e `NOTIFY`.
+  - Con `actor_kind=ActorKind.BATCH` (attività automatica) `actor` deve essere `None`, altrimenti `ValueError`.
+- `last_logged_at(entries, object_ids) -> dict`: per ogni oggetto, l'ora della sua voce più recente tra `entries` (un
+  QuerySet di voci già filtrato da chi chiama: modello, azione, `changes`...), con una sola query; gli oggetti senza
+  voci mancano. Serve per esempio a distanziare i promemoria inviati a proposito di una riga:
+
+  ```python
+  sent = OrderLog.objects.filter(model="Customer", action=AuditAction.NOTIFY, changes__delivered=True)
+  last = last_logged_at(sent, [c.pk for c in customers])   # {customer_id: datetime}
+  ```
+- **Blocco anti-spam breve (facoltativo)**: impedisce due invii verso l'esterno (email, SMS, webhook...) a proposito dello
+  stesso oggetto a meno di `DJKIT_COOLDOWN_SECONDS` secondi (default `DEFAULT_COOLDOWN_SECONDS` = 60, il valore più
+  diffuso nei servizi di email e OTP; non esiste uno standard ufficiale; `0` lo spegne, negativo →
+  `ImproperlyConfigured`). Ferma doppi clic, tentativi ripetuti e due utenti che inviano nello stesso momento. Non usa
+  tabelle proprie: legge il registro. **Requisiti, solo per chi lo usa:** ogni invio lascia una voce nel registro
+  (es. `NOTIFY`) nella stessa transazione dell'invio, e il controllo si fa con la riga dell'oggetto bloccata
+  (`select_for_update`), così due richieste simultanee non passano entrambe.
+  - `cooldown_seconds() -> int`: l'intervallo dal setting.
+  - `cooldown_until(entries, object_id, seconds=None) -> datetime | None`: fino a quando l'invio è bloccato, `None` se
+    è permesso ora. `entries` sono le voci che contano come invii, già filtrate da chi chiama; `seconds` sostituisce
+    il setting.
+  - `ensure_cooldown(entries, object_id, seconds=None) -> None`: solleva `TooManyRequests(retry_at)` (429) dentro
+    l'intervallo.
+
+  ```python
+  with transaction.atomic():
+      Customer.objects.select_for_update().get(pk=customer.pk)
+      notified = OrderLog.objects.filter(model="Customer", action=AuditAction.NOTIFY)
+      ensure_cooldown(notified, customer.pk)        # 429 se l'ultimo invio è di meno di 60 s fa
+      send_email([customer.email], subject, body)
+      log_write(OrderLog, request.user, AuditAction.NOTIFY, customer)
+  ```
   - Un utente anonimo viene salvato come `actor=None`.
   - `object_label` viene troncato alla lunghezza del campo.
   - `context` contiene i campi aggiuntivi del modello concreto.

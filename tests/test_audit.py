@@ -15,11 +15,30 @@ from decimal import Decimal
 from unittest import mock
 
 from django.apps import apps
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.db import connection, models
+from django.core.exceptions import ImproperlyConfigured
+from django.db import IntegrityError, transaction
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
-from djkit.audit import AuditAction, AuditEntryBase, diff, log_write, mask_changes, snapshot, to_json_value
+from djkit.errors import TooManyRequests
+
+from djkit.audit import (
+    ActorKind,
+    AuditAction,
+    AuditEntryBase,
+    cooldown_seconds,
+    cooldown_until,
+    diff,
+    ensure_cooldown,
+    last_logged_at,
+    log_write,
+    mask_changes,
+    snapshot,
+    to_json_value,
+)
 from djkit.testing.api import make_user
 
 
@@ -122,6 +141,13 @@ class LogWriteTests(TestCase):
         self.assertEqual(changed.changes, {"name": ["red", "blue"]})
         self.assertEqual(empty.changes, {})
 
+    def test_notify_stores_given_details_or_nothing(self):
+        """NOTIFY with details -> the details; without -> {} (no snapshot: the row did not change)."""
+        sent = log_write(AuditTestEntry, self.user, AuditAction.NOTIFY, self.group, {"channel": "email"})
+        bare = log_write(AuditTestEntry, self.user, AuditAction.NOTIFY, self.group)
+        self.assertEqual((sent.action, sent.changes), ("NOTIFY", {"channel": "email"}))
+        self.assertEqual(bare.changes, {})
+
     def test_anonymous_actor_stored_as_none(self):
         """AnonymousUser or None -> actor None."""
         self.assertIsNone(log_write(AuditTestEntry, AnonymousUser(), AuditAction.DELETE, self.group).actor)
@@ -157,9 +183,36 @@ class LogWriteTests(TestCase):
                 self.assertEqual(model.check(), [])
 
     def test_action_check_constraint_inherited(self):
-        """The abstract base adds the 'djkit_audittestentry_action_valid' constraint."""
+        """The abstract base adds the action and actor_kind constraints."""
         names = {constraint.name for constraint in AuditTestEntry._meta.constraints}
-        self.assertIn("djkit_audittestentry_action_valid", names)
+        self.assertLessEqual(
+            {
+                "djkit_audittestentry_action_valid",
+                "djkit_audittestentry_actor_kind_valid",
+                "djkit_audittestentry_batch_without_actor",
+            },
+            names,
+        )
+
+    def test_actor_kind_user_by_default_batch_without_actor(self):
+        """Default USER; BATCH with actor None -> stored, label says BATCH; BATCH with a user -> ValueError."""
+        self.assertEqual(log_write(AuditTestEntry, self.user, AuditAction.UPDATE, self.group).actor_kind, "USER")
+        batch = log_write(AuditTestEntry, None, AuditAction.NOTIFY, self.group, actor_kind=ActorKind.BATCH)
+        batch.refresh_from_db()
+        self.assertEqual((batch.actor, batch.actor_kind), (None, "BATCH"))
+        self.assertIn(" BATCH NOTIFY Group", str(batch))
+        with self.assertRaises(ValueError):
+            log_write(AuditTestEntry, self.user, AuditAction.NOTIFY, self.group, actor_kind=ActorKind.BATCH)
+
+    def test_database_refuses_batch_with_actor_and_unknown_kind(self):
+        """Written around log_write: BATCH with an actor, or an unknown actor_kind -> IntegrityError."""
+        rows = [
+            {"actor": self.user, "actor_kind": ActorKind.BATCH},
+            {"actor": None, "actor_kind": "ROBOT"},
+        ]
+        for row in rows:
+            with self.subTest(row=row), self.assertRaises(IntegrityError), transaction.atomic():
+                AuditTestEntry.objects.create(action=AuditAction.NOTIFY, model="Group", **row)
 
 
 @override_settings(DJKIT_AUDIT_MASKED_FIELDS={"email", "phone"}, DJKIT_MESSAGES={})
@@ -203,3 +256,94 @@ class LogWriteMaskingTests(TestCase):
         updated = log_write(AuditTestEntry, user, AuditAction.UPDATE, group, diff(before, snapshot(group)))
         self.assertEqual(created.changes, {"name": "[omesso]"})
         self.assertEqual(updated.changes, {"name": ["[omesso]", "[omesso]"]})
+
+
+class LastLoggedAtTests(TestCase):
+    """last_logged_at gives the newest entry of each object among the entries passed."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        super().setUpClass()
+        with connection.schema_editor() as editor:
+            editor.create_model(AuditTestEntry)
+
+    def test_newest_per_object_only_among_the_given_entries(self):
+        """red: two NOTIFY -> the newer; blue: only an UPDATE -> missing when filtering NOTIFY; green not asked."""
+        user = make_user()
+        red, blue, green = (Group.objects.create(name=name) for name in ("red", "blue", "green"))
+        old = log_write(AuditTestEntry, user, AuditAction.NOTIFY, red)
+        new = log_write(AuditTestEntry, user, AuditAction.NOTIFY, red)
+        log_write(AuditTestEntry, user, AuditAction.UPDATE, blue)
+        log_write(AuditTestEntry, user, AuditAction.NOTIFY, green)
+        AuditTestEntry.objects.filter(pk=old.pk).update(timestamp=new.timestamp - datetime.timedelta(days=1))
+        notified = AuditTestEntry.objects.filter(action=AuditAction.NOTIFY)
+        self.assertEqual(last_logged_at(notified, [red.pk, blue.pk]), {red.pk: new.timestamp})
+
+
+class CooldownTests(TestCase):
+    """cooldown_until / ensure_cooldown: hard block between two sends about the same object."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        super().setUpClass()
+        with connection.schema_editor() as editor:
+            editor.create_model(AuditTestEntry)
+
+    def setUp(self):
+        """A user, two groups and the NOTIFY entries as the sends that count."""
+        self.user = make_user()
+        self.red, self.blue = (Group.objects.create(name=name) for name in ("red", "blue"))
+        self.sends = AuditTestEntry.objects.filter(action=AuditAction.NOTIFY)
+
+    def notify(self, group, seconds_ago: int = 0) -> AuditTestEntry:
+        """A NOTIFY entry about `group`, moved `seconds_ago` seconds in the past."""
+        entry = log_write(AuditTestEntry, self.user, AuditAction.NOTIFY, group)
+        AuditTestEntry.objects.filter(pk=entry.pk).update(
+            timestamp=timezone.now() - datetime.timedelta(seconds=seconds_ago)
+        )
+        entry.refresh_from_db()
+        return entry
+
+    def test_default_is_60_seconds(self):
+        """Setting missing -> DEFAULT_COOLDOWN_SECONDS, 60."""
+        with self.settings():
+            del settings.DJKIT_COOLDOWN_SECONDS
+            self.assertEqual(cooldown_seconds(), 60)
+
+    @override_settings(DJKIT_COOLDOWN_SECONDS=-1)
+    def test_negative_setting_is_a_configuration_error(self):
+        """DJKIT_COOLDOWN_SECONDS=-1 -> ImproperlyConfigured."""
+        with self.assertRaises(ImproperlyConfigured):
+            cooldown_seconds()
+
+    def test_never_sent_is_free(self):
+        """No entry -> None, ensure_cooldown passes."""
+        self.assertIsNone(cooldown_until(self.sends, self.red.pk))
+        ensure_cooldown(self.sends, self.red.pk)
+
+    def test_recent_send_blocks_until_the_interval_ends(self):
+        """Sent 10 s ago -> blocked until +60 s; TooManyRequests with that retry_at; other objects free."""
+        entry = self.notify(self.red, seconds_ago=10)
+        end = entry.timestamp + datetime.timedelta(seconds=60)
+        self.assertEqual(cooldown_until(self.sends, self.red.pk), end)
+        with self.assertRaises(TooManyRequests) as caught:
+            ensure_cooldown(self.sends, self.red.pk)
+        self.assertEqual(caught.exception.retry_at, end)
+        self.assertIsNone(cooldown_until(self.sends, self.blue.pk))
+
+    def test_old_send_or_entries_not_counted_are_free(self):
+        """Sent 61 s ago -> free; a recent UPDATE is not among the sends -> free."""
+        self.notify(self.red, seconds_ago=61)
+        log_write(AuditTestEntry, self.user, AuditAction.UPDATE, self.blue)
+        self.assertIsNone(cooldown_until(self.sends, self.red.pk))
+        self.assertIsNone(cooldown_until(self.sends, self.blue.pk))
+
+    def test_interval_from_argument_or_setting_zero_turns_it_off(self):
+        """seconds=5 and sent 10 s ago -> free; DJKIT_COOLDOWN_SECONDS=0 -> free right after a send."""
+        self.notify(self.red, seconds_ago=10)
+        self.assertIsNone(cooldown_until(self.sends, self.red.pk, seconds=5))
+        self.assertIsNotNone(cooldown_until(self.sends, self.red.pk, seconds=3600))
+        with self.settings(DJKIT_COOLDOWN_SECONDS=0):
+            self.assertIsNone(cooldown_until(self.sends, self.red.pk))

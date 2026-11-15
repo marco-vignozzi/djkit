@@ -29,6 +29,15 @@ class ErrorHandlerTests(ApiTestCase):
         self.assertStatus(response, 409)
         self.assertEqual(response.json()["detail"], "Conflict with the current state.")
 
+    def test_too_many_requests_is_429_with_retry_at(self):
+        """TooManyRequests(retry_at) -> 429 with the default message and retry_at in ISO format."""
+        response = self.client.get("/api/public/too-many")
+        self.assertStatus(response, 429)
+        self.assertEqual(
+            response.json(),
+            {"detail": "Too many requests: try again later.", "retry_at": "2030-01-01T12:00:00+00:00"},
+        )
+
     def test_invalid_data_is_422_with_field_errors(self):
         """InvalidData(errors=...) -> 422 with the errors."""
         response = self.client.get("/api/public/invalid")

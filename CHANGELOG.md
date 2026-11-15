@@ -11,6 +11,24 @@ All notable changes to djkit. Versions follow semantic versioning
 - `numbers.minimal_transfers(balances)`: the fewest transfers that bring
   balances adding up to zero to zero.
 
+- `audit.AuditAction.NOTIFY`: a message sent about a row (e.g. an email
+  reminder); `log_write` stores `{}` when no changes are given. Projects
+  with a concrete entry model need a migration (choices and constraint).
+- `audit.last_logged_at(entries, object_ids)`: newest entry of each object
+  among already filtered entries, in one query.
+- `audit.ActorKind` (`USER`, `BATCH`) and the field
+  `AuditEntryBase.actor_kind` (default `USER`), with the checks
+  `<app>_<class>_actor_kind_valid` and `<app>_<class>_batch_without_actor`
+  (`AuditEntryBase.actor_kind_constraints(prefix)` for subclasses that
+  redefine `Meta.constraints`); `log_write(..., actor_kind=...)` refuses a
+  BATCH entry with an actor. Projects need a migration.
+- `audit.cooldown_seconds`, `cooldown_until`, `ensure_cooldown`: optional
+  short anti-spam block between two sends about the same object, based on
+  the audit log (no table of its own); setting `DJKIT_COOLDOWN_SECONDS`
+  (default 60).
+- `errors.TooManyRequests(retry_at)` -> 429 with `retry_at`;
+  `api.ErrorOut.retry_at`.
+
 ### Documentation
 - `views.page_not_found` as the catch-all route after the API: a JSON 404
   for unknown API paths with DEBUG on too.
