@@ -5,7 +5,11 @@ Email sending.
       templates ("<name>_subject.txt" and "<name>_body.txt"), so the texts
       (and their language) live in the project, not in the code.
     - send_email: send one plain-text email with django.core.mail, or only
-      write it to the log in demo mode (DJKIT_MAIL_DEMO_MODE).
+      write it to the log in demo mode (DJKIT_MAIL_DEMO_MODE) or when every
+      recipient is in a blocked domain (DJKIT_MAIL_BLOCKED_DOMAINS).
+    - blocked_domains / is_blocked: the domains never written to (by
+      default the reserved ones of RFC 2606 and RFC 6761, used by sample
+      and test data).
     - ReadableConsoleBackend: development email backend that prints emails
       in the terminal as plain text (Django's console backend prints the
       encoded message: accented text turns into quoted-printable, where
@@ -25,6 +29,37 @@ from django.core.mail.backends.console import EmailBackend as ConsoleEmailBacken
 from django.template.loader import render_to_string
 
 logger = logging.getLogger(__name__)
+
+
+# Domains reserved for examples and tests (RFC 2606, RFC 6761): no real
+# mailbox lives there. A domain also covers its subdomains.
+RESERVED_DOMAINS = ("example.com", "example.net", "example.org", "example", "invalid", "test", "localhost")
+
+
+def blocked_domains() -> tuple[str, ...]:
+    """
+    The domains emails are never sent to.
+
+    Returns:
+        settings.DJKIT_MAIL_BLOCKED_DOMAINS (lowercase), RESERVED_DOMAINS
+        when missing; () turns the check off.
+    """
+    return tuple(domain.lower().strip(".") for domain in getattr(settings, "DJKIT_MAIL_BLOCKED_DOMAINS", RESERVED_DOMAINS))
+
+
+def is_blocked(address: str) -> bool:
+    """
+    Whether an address is in a blocked domain (or a subdomain of one).
+
+    Args:
+        address: an email address.
+
+    Returns:
+        True for e.g. "anna@example.com" or "x@mail.test" with the default
+        domains.
+    """
+    domain = address.rsplit("@", 1)[-1].lower().strip(".")
+    return any(domain == blocked or domain.endswith("." + blocked) for blocked in blocked_domains())
 
 
 def demo_mode() -> bool:
@@ -77,8 +112,10 @@ def send_email(
         from_email: sender; settings.DEFAULT_FROM_EMAIL when None.
 
     Returns:
-        True when the email was handed to the email backend, False in demo
-        mode (the email is only logged, with its recipients and subject).
+        True when the email was handed to the email backend (to the
+        recipients not blocked, see is_blocked); False in demo mode or when
+        every recipient is blocked (the email is only logged, with its
+        recipients and subject).
 
     Raises:
         Any error of the email backend (e.g. smtplib.SMTPException): the
@@ -86,6 +123,12 @@ def send_email(
     """
     if demo_mode():
         logger.info("Demo mode, email not sent: to=%s subject=%r", to, subject)
+        return False
+    blocked = [address for address in to if is_blocked(address)]
+    if blocked:
+        logger.info("Blocked domain, email not sent to %s: subject=%r", blocked, subject)
+    to = [address for address in to if not is_blocked(address)]
+    if not to:
         return False
     message = EmailMessage(subject=subject, body=body, from_email=from_email, to=to, reply_to=reply_to)
     message.send(fail_silently=False)

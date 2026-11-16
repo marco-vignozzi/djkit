@@ -64,7 +64,8 @@ djkit/
 ├── notices.py           # avvisi delle scadenze: preferenze per utente, già avvisati, finestre
 ├── validators.py        # normalizzazione di dati personali generici e dei testi in ingresso
 ├── it.py                # dati italiani: codice fiscale
-├── mail.py              # invio email (testi da template) con modalità demo
+├── mail.py              # invio email (testi da template) con modalità demo e domini bloccati
+├── clients.py           # indirizzo del client (anche dietro proxy) e sua chiave anonima
 ├── numbers.py           # divisione di un totale in parti uguali o per pesi, trasferimenti minimi
 ├── texts.py             # catalogo dei testi per chiave, servito al frontend con ETag, chiavi esportate in TypeScript
 ├── management/commands/export_text_types.py   # comando che scrive le chiavi del catalogo in un file .ts
@@ -103,6 +104,7 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 | `DJKIT_AUDIT_MASKED_FIELDS` | `frozenset()` | `audit` | campi scritti nel registro con il valore **mascherato** (testo della chiave `audit_masked`; un valore vuoto resta vuoto): si vede che il campo è stato impostato o cambiato, mai il valore. Vale per i campi con quel nome in **ogni** modello (es. dati personali: `{"email", "phone"}`) | ✅ |
 | `DJKIT_MESSAGES` | `{}` | `messages` (e quindi `errors`, `api`, `views`, `auth`, `db`, `updates`) | testi dei messaggi per l'utente, `{chiave: testo}`; le chiavi assenti restano col testo inglese di `DEFAULT_MESSAGES`. Un progetto in un'altra lingua le fornisce **tutte** (vedi §4.0) | ✅ |
 | `DJKIT_MAIL_DEMO_MODE` | `False` | `mail` | se vero `send_email` non invia e registra nel log destinatari e oggetto (istanze dimostrative) | ✅ |
+| `DJKIT_MAIL_BLOCKED_DOMAINS` | `RESERVED_DOMAINS` | `mail` | domini (e sottodomini) a cui `send_email` non scrive mai; `[]` = nessun blocco | ✅ |
 
 Setting di Django usati: `EMAIL_BACKEND`, `DEFAULT_FROM_EMAIL` (`mail`); `PASSWORD_RESET_TIMEOUT` (`auth`, validità dei
 link di cambio password, in secondi).
@@ -377,6 +379,11 @@ log_write(AuditLogEntry, request.user, AuditAction.UPDATE, invoice, changes, tea
     il setting.
   - `ensure_cooldown(entries, object_id, seconds=None) -> None`: solleva `TooManyRequests(retry_at)` (429) dentro
     l'intervallo.
+- **Limite di frequenza** ✅: `rate_limit_until(entries, limit, window_seconds) -> datetime | None`: al massimo `limit`
+  azioni in qualunque finestra di `window_seconds`, contando le voci del registro già filtrate da chi chiama (es. le
+  `CREATE` degli account creati da uno stesso client, con la chiave di `clients.client_key` nelle `changes`).
+  Restituisce quando la voce più vecchia che conta esce dalla finestra, `None` se l'azione è permessa ora. Anche qui
+  nessuna tabella propria.
 
   ```python
   with transaction.atomic():
@@ -679,6 +686,13 @@ in sviluppo, SMTP in produzione; nei test Django usa la memoria e le email finis
   registrata nel log, con destinatari e oggetto). Gli errori del server **non** vengono nascosti
   (`fail_silently=False`): arrivano al chiamante, che decide cosa mostrare all'utente.
 - `demo_mode() -> bool`: il setting `DJKIT_MAIL_DEMO_MODE`.
+- **Domini bloccati** ✅: `send_email` non scrive mai agli indirizzi dei domini di `DJKIT_MAIL_BLOCKED_DOMAINS` (anche
+  ai loro sottodomini). Di default sono i domini riservati agli esempi e ai test (`RESERVED_DOMAINS`, RFC 2606 e RFC
+  6761: `example.com`, `example.net`, `example.org`, `example`, `invalid`, `test`, `localhost`), così i dati di
+  esempio non fanno mai partire un'email. Gli indirizzi bloccati vengono tolti dai destinatari e scritti nel log; se
+  non resta nessuno l'email non parte e `send_email` restituisce `False`. `[]` spegne il controllo.
+  - `blocked_domains() -> tuple[str, ...]`: i domini dal setting.
+  - `is_blocked(address) -> bool`: se l'indirizzo è in un dominio bloccato.
 - `ReadableConsoleBackend`: backend email per lo sviluppo (`EMAIL_BACKEND = "djkit.mail.ReadableConsoleBackend"`).
   Stampa nel terminale `From`, `To`, `Cc`, `Reply-To`, `Subject` e il testo **così com'è scritto**. Il backend console
   di Django stampa invece il messaggio codificato: con lettere accentate il testo diventa quoted-printable e nei link
@@ -687,6 +701,24 @@ in sviluppo, SMTP in produzione; nei test Django usa la memoria e le email finis
 ```python
 subject, body = render_email("shop/emails/welcome", {"user": user})
 send_email([user.email], subject, body, reply_to=[shop.owner_email])
+```
+
+### 4.9c `clients` — Chi sta chiamando ✅
+
+Per i limiti anti-abuso degli endpoint pubblici.
+
+- `client_address(request, proxy_count=0) -> str`: l'indirizzo del client. Con `proxy_count = 0` è `REMOTE_ADDR`;
+  dietro `proxy_count` reverse proxy che aggiungono l'indirizzo ricevuto a `X-Forwarded-For` è il `proxy_count`-esimo
+  indirizzo da destra (quelli a sinistra li può scrivere il client); `REMOTE_ADDR` se l'intestazione è più corta.
+- `client_key(request, proxy_count=0) -> str`: un hash con chiave (`salted_hmac` con `SECRET_KEY`) di quell'indirizzo,
+  32 caratteri esadecimali: stabile per lo stesso client, inutile per identificare una persona, quindi si può scrivere
+  nel registro.
+
+```python
+key = client_key(request, proxy_count=1)
+until = rate_limit_until(Entry.objects.filter(changes__client=key), limit=3, window_seconds=3600)
+if until is not None:
+    raise TooManyRequests(until)
 ```
 
 ### 4.9a `texts` — Catalogo dei testi ✅

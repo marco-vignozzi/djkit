@@ -11,6 +11,8 @@ Audit log: who changed what, and when.
       transaction as the write, so the log and the data never diverge.
     - last_logged_at: newest entry of each object in a set of entries
       (e.g. to space out the reminders sent about it).
+    - rate_limit_until: at most N actions in a time window (e.g. accounts
+      created from one client), counted on log entries.
     - cooldown_until / ensure_cooldown: short, hard anti-spam block for
       outbound communications (emails, SMS, webhooks...), based on the log
       itself, so it needs no table of its own. Optional: a project that
@@ -395,6 +397,29 @@ def last_logged_at(entries: models.QuerySet, object_ids) -> dict:
         .order_by()
     )
     return dict(rows)
+
+
+def rate_limit_until(entries: models.QuerySet, limit: int, window_seconds: int):
+    """
+    Until when a new action is blocked by a rate limit: at most `limit`
+    actions in any `window_seconds`, the actions being the given entries
+    (e.g. the CREATE entries of the accounts made from one client).
+
+    Args:
+        entries: the entries that count, already filtered by the caller.
+        limit: actions allowed in the window (>= 1).
+        window_seconds: the window.
+
+    Returns:
+        The time the oldest entry that still counts leaves the window, or
+        None when an action is allowed now (fewer than `limit` entries in
+        the last window_seconds).
+    """
+    since = timezone.now() - datetime.timedelta(seconds=window_seconds)
+    recent = list(entries.filter(timestamp__gt=since).order_by("-timestamp").values_list("timestamp", flat=True)[:limit])
+    if len(recent) < limit:
+        return None
+    return recent[-1] + datetime.timedelta(seconds=window_seconds)
 
 
 def cooldown_seconds() -> int:

@@ -252,6 +252,6 @@ class MakeUserTests(ApiTestCase):
         self.assertNotEqual(first.password, "pw-1")
 
     def test_overrides_replace_placeholders(self):
-        """USERNAME_FIELD override "bruno@example.com" -> stored as given (whatever the user model)."""
-        user = make_user(**{get_user_model().USERNAME_FIELD: "bruno@example.com"})
-        self.assertEqual(user.get_username(), "bruno@example.com")
+        """USERNAME_FIELD override "bruno@rentals-test.it" -> stored as given (whatever the user model)."""
+        user = make_user(**{get_user_model().USERNAME_FIELD: "bruno@rentals-test.it"})
+        self.assertEqual(user.get_username(), "bruno@rentals-test.it")

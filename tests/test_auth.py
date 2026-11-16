@@ -76,7 +76,7 @@ class LoginWithPasswordTests(ApiTestCase):
 
     def test_wrong_password_and_unknown_user_give_same_error(self):
         """Wrong password and unknown username -> same 422 'Invalid credentials.'."""
-        for username, password in [(self.username, "Wrong-pass-1"), ("nobody@example.com", "Right-pass-1")]:
+        for username, password in [(self.username, "Wrong-pass-1"), ("nobody@rentals-test.it", "Right-pass-1")]:
             with self.subTest(username=username):
                 response = self.client.post("/api/public/login", {"username": username, "password": password})
                 self.assertStatus(response, 422)

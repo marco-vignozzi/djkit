@@ -36,6 +36,7 @@ from djkit.audit import (
     last_logged_at,
     log_write,
     mask_changes,
+    rate_limit_until,
     snapshot,
     to_json_value,
 )
@@ -347,3 +348,31 @@ class CooldownTests(TestCase):
         self.assertIsNotNone(cooldown_until(self.sends, self.red.pk, seconds=3600))
         with self.settings(DJKIT_COOLDOWN_SECONDS=0):
             self.assertIsNone(cooldown_until(self.sends, self.red.pk))
+
+
+class RateLimitTests(TestCase):
+    """rate_limit_until(): at most N entries in a window, counted on the log."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        super().setUpClass()
+        with connection.schema_editor() as editor:
+            editor.create_model(AuditTestEntry)
+
+    def entries(self, *ages_seconds):
+        """One CREATE entry on Group 1 per age (seconds ago), as a QuerySet."""
+        now = timezone.now()
+        for age in ages_seconds:
+            entry = AuditTestEntry.objects.create(action=AuditAction.CREATE, model="Group", object_id=1, object_label="x")
+            AuditTestEntry.objects.filter(pk=entry.pk).update(timestamp=now - datetime.timedelta(seconds=age))
+        return AuditTestEntry.objects.all()
+
+    def test_below_the_limit_is_allowed(self):
+        """2 entries in the last hour, limit 3 -> None; old entries do not count."""
+        self.assertIsNone(rate_limit_until(self.entries(10, 20, 5000), 3, 3600))
+
+    def test_at_the_limit_waits_for_the_oldest_to_leave(self):
+        """Entries 100, 200, 300 s ago, limit 3 per hour -> allowed again 3300 s from now."""
+        until = rate_limit_until(self.entries(100, 200, 300), 3, 3600)
+        self.assertAlmostEqual((until - timezone.now()).total_seconds(), 3300, delta=5)

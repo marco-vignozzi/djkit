@@ -6,6 +6,15 @@ All notable changes to djkit. Versions follow semantic versioning
 ## [0.6.0] — unreleased
 
 ### Added
+- `mail`: blocked domains (`DJKIT_MAIL_BLOCKED_DOMAINS`, default
+  `RESERVED_DOMAINS` of RFC 2606 / 6761; `blocked_domains`, `is_blocked`):
+  `send_email` never writes to them and returns `False` when no recipient
+  is left. **Behaviour change:** emails to `example.com` & co. are no
+  longer sent by default.
+- `clients`: `client_address(request, proxy_count)` and `client_key`
+  (keyed hash of the address) for the abuse limits of public endpoints.
+- `audit.rate_limit_until(entries, limit, window_seconds)`: at most N
+  actions in a time window, counted on the log.
 - `notices`: deadline notices (`NoticeRule`, `rules`, `deadline_key`,
   `to_notify`, `sent_for`, `record`, `prune`, `MAX_DAYS_BEFORE`) and the
   abstract models `NoticePreferenceBase` and `DeadlineNoticeBase`.
