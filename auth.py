@@ -2,7 +2,8 @@
 Session authentication helpers.
 
     - validate_new_password: run the project's AUTH_PASSWORD_VALIDATORS and
-      report failures as InvalidData on the "password" field.
+      report failures as InvalidData on the "password" field (skipped with
+      dev.relaxed_validation()).
     - login_with_password: check credentials and start a Django session, or
       raise InvalidData with a generic message.
     - password_reset_token / user_for_password_reset / reset_password:
@@ -27,6 +28,7 @@ from django.core.exceptions import ValidationError
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
+from .dev import relaxed_validation
 from .errors import InvalidData
 from .messages import get_message
 
@@ -34,6 +36,9 @@ from .messages import get_message
 def validate_new_password(password: str, user=None, field: str = "password") -> None:
     """
     Check a new password against settings.AUTH_PASSWORD_VALIDATORS.
+
+    With dev.relaxed_validation() on (development only) every password is
+    accepted.
 
     Args:
         password: the plain-text password chosen by the user.
@@ -45,6 +50,8 @@ def validate_new_password(password: str, user=None, field: str = "password") -> 
     Raises:
         InvalidData: with errors={field: [messages]} when a validator fails.
     """
+    if relaxed_validation():
+        return
     try:
         validate_password(password, user)
     except ValidationError as error:

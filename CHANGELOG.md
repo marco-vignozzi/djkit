@@ -6,6 +6,12 @@ All notable changes to djkit. Versions follow semantic versioning
 ## [0.6.0] — unreleased
 
 ### Added
+- `dev.relaxed_validation` (`DJKIT_RELAXED_VALIDATION`, development only):
+  `auth.validate_new_password` accepts any password, `it.validate_tax_code`
+  1 to 16 characters; the test runner forces it off
+  (`install_strict_validation`).
+- `it.TaxCodeValidator` replaces the `RegexValidator` of `validate_tax_code`
+  (same rules; projects need an `AlterField` migration).
 - `views.spa_index`: catch-all serving the SPA `index.html` (`DJKIT_SPA_INDEX`).
 - `mail`: blocked domains (`DJKIT_MAIL_BLOCKED_DOMAINS`, default
   `RESERVED_DOMAINS` of RFC 2606 / 6761; `blocked_domains`, `is_blocked`):

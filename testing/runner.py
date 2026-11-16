@@ -529,6 +529,19 @@ def install_test_password_hashers():
     return override
 
 
+def install_strict_validation():
+    """
+    Force DJKIT_RELAXED_VALIDATION off (djkit.dev), so the tests always
+    check the production rules even when the developer's .env relaxes them.
+
+    Returns:
+        The enabled override_settings (to disable it later).
+    """
+    override = override_settings(DJKIT_RELAXED_VALIDATION=False)
+    override.enable()
+    return override
+
+
 def _init_worker_with_test_hashers(counter, *args, **kwargs):
     """
     Set up a worker process of a parallel run: Django's own setup (its test
@@ -542,6 +555,7 @@ def _init_worker_with_test_hashers(counter, *args, **kwargs):
     """
     _init_worker(counter, *args, **kwargs)
     install_test_password_hashers()
+    install_strict_validation()
 
 
 class TrackingRemoteTestResult(RemoteTestResult):
@@ -596,19 +610,22 @@ class VerboseTestRunner(DiscoverRunner):
     Falls back to Django's own result classes with `-v 0`, `--debug-sql`
     or `--pdb`. While the tests run, PASSWORD_HASHERS is replaced by
     password_hashers_for_tests() (see DEFAULT_TEST_PASSWORD_HASHERS), also
-    in the worker processes of `--parallel` (VerboseParallelTestSuite).
+    in the worker processes of `--parallel` (VerboseParallelTestSuite), and
+    DJKIT_RELAXED_VALIDATION is forced off (install_strict_validation).
     """
 
     parallel_test_suite = VerboseParallelTestSuite
 
     def setup_test_environment(self, **kwargs):
-        """Django's test environment, plus the fast test password hashers."""
+        """Django's test environment, plus the fast test password hashers and strict validation."""
         super().setup_test_environment(**kwargs)
         self._hashers_override = install_test_password_hashers()
+        self._strict_override = install_strict_validation()
 
     def teardown_test_environment(self, **kwargs):
-        """Restore the project's password hashers, then Django's teardown."""
+        """Restore the project's password hashers and validation, then Django's teardown."""
         global _project_password_hashers
+        self._strict_override.disable()
         if self._hashers_override is not None:
             self._hashers_override.disable()
             self._hashers_override = None

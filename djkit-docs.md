@@ -64,6 +64,7 @@ djkit/
 ├── notices.py           # avvisi delle scadenze: preferenze per utente, già avvisati, finestre
 ├── validators.py        # normalizzazione di dati personali generici e dei testi in ingresso
 ├── it.py                # dati italiani: codice fiscale
+├── dev.py               # comodità di sviluppo: interruttore della validazione allentata
 ├── mail.py              # invio email (testi da template) con modalità demo e domini bloccati
 ├── clients.py           # indirizzo del client (anche dietro proxy) e sua chiave anonima
 ├── numbers.py           # divisione di un totale in parti uguali o per pesi, trasferimenti minimi
@@ -76,8 +77,8 @@ djkit/
 ```
 
 Dipendenze interne: `errors` → `messages`; `api` → `errors`, `messages`; `views` → `messages`;
-`access` → `errors`; `auth` → `errors`, `messages`; `db` → `errors`, `messages`; `audit` → `fields`, `messages`;
-`updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`); `it` → `messages`; il comando `export_text_types` →
+`access` → `errors`; `auth` → `dev`, `errors`, `messages`; `db` → `errors`, `messages`; `audit` → `fields`, `messages`;
+`updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`); `it` → `dev`, `messages`; il comando `export_text_types` →
 `texts`. Tutti gli altri moduli sono indipendenti tra loro.
 
 `djkit` non ha un modulo `models`: i modelli astratti (`audit.AuditEntryBase`) si importano dal loro modulo e
@@ -104,6 +105,7 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 | `DJKIT_AUDIT_MASKED_FIELDS` | `frozenset()` | `audit` | campi scritti nel registro con il valore **mascherato** (testo della chiave `audit_masked`; un valore vuoto resta vuoto): si vede che il campo è stato impostato o cambiato, mai il valore. Vale per i campi con quel nome in **ogni** modello (es. dati personali: `{"email", "phone"}`) | ✅ |
 | `DJKIT_MESSAGES` | `{}` | `messages` (e quindi `errors`, `api`, `views`, `auth`, `db`, `updates`) | testi dei messaggi per l'utente, `{chiave: testo}`; le chiavi assenti restano col testo inglese di `DEFAULT_MESSAGES`. Un progetto in un'altra lingua le fornisce **tutte** (vedi §4.0) | ✅ |
 | `DJKIT_SPA_INDEX` | nessuno (obbligatorio per `spa_index`) | `views` | percorso dell'`index.html` della build della SPA | ✅ |
+| `DJKIT_RELAXED_VALIDATION` | `False` | `dev` (e quindi `auth`, `it`) | solo sviluppo: password senza regole, codice fiscale da 1 a 16 caratteri; con `DEBUG` spento → `ImproperlyConfigured`; spento durante i test | ✅ |
 | `DJKIT_MAIL_DEMO_MODE` | `False` | `mail` | se vero `send_email` non invia e registra nel log destinatari e oggetto (istanze dimostrative) | ✅ |
 | `DJKIT_MAIL_BLOCKED_DOMAINS` | `RESERVED_DOMAINS` | `mail` | domini (e sottodomini) a cui `send_email` non scrive mai; `[]` = nessun blocco | ✅ |
 
@@ -274,6 +276,7 @@ Funzionano con qualunque modello utente (usano solo `django.contrib.auth`).
 - `validate_new_password(password: str, user=None, field: str = "password") -> None`: applica
   `AUTH_PASSWORD_VALIDATORS`; se la password non va bene solleva `InvalidData(errors={field: [messaggi]})`.
   `user` (anche non ancora salvato) permette ai validatori di confrontare la password con i dati dell'utente.
+  Con `dev.relaxed_validation()` attivo (solo sviluppo) accetta qualunque password.
 - `login_with_password(request, username: str, password: str, detail: str | None = None) -> user`:
   `authenticate()` + `login()` (imposta il cookie di sessione). Credenziali errate o utente non attivo →
   `InvalidData` con lo stesso messaggio (`detail`, oppure la chiave `login_failed`), così non si rivela se
@@ -669,8 +672,9 @@ for user in recipients:
   di testo, prima della validazione del modello: `"   "` diventa `""` e viene rifiutato da un campo obbligatorio.
   `None` resta `None`.
 - `it.TAX_CODE_LENGTH = 16`
-- `it.validate_tax_code`: `RegexValidator` che accetta esattamente 16 lettere maiuscole o cifre
-  (codice `invalid_tax_code`). Il messaggio è la chiave `tax_code_invalid` (`{length}`), letta quando viene mostrato.
+- `it.validate_tax_code`: istanza di `it.TaxCodeValidator` (deconstructible, nessuna opzione) che accetta
+  esattamente 16 lettere maiuscole o cifre (`TAX_CODE_PATTERN`), oppure da 1 a 16 con `dev.relaxed_validation()`
+  attivo (`RELAXED_TAX_CODE_PATTERN`); codice `invalid_tax_code`. Non controlla il carattere finale. Il messaggio è la chiave `tax_code_invalid` (`{length}`), letta quando viene mostrato.
 - `it.normalize_tax_code(value: str | None) -> str | None`: toglie gli spazi e converte in maiuscolo.
 - Formati dei valori dentro i testi in italiano (un frontend che formatta con `Intl` in `it-IT` ottiene lo stesso
   risultato):
@@ -678,6 +682,20 @@ for user in recipients:
   - `it.format_amount(value: Decimal) -> str`: `"1.234,50"` (senza simbolo).
   - `it.format_percent(value: Decimal) -> str`: `"50"`, `"33,33"` (senza simbolo e senza zeri inutili).
   - `it.format_names(names) -> str`: `"Anna"`, `"Anna e Bruno"`, `"Anna, Bruno e Carla"`.
+
+### 4.8a `dev` — Validazione allentata in sviluppo ✅
+
+- `relaxed_validation() -> bool`: valore di `DJKIT_RELAXED_VALIDATION` (default `False`). Attivo con `DEBUG`
+  spento → `ImproperlyConfigured`: non deve mai arrivare in produzione.
+- Salta solo i controlli che rallentano l'inserimento dei dati di prova; restano tutte le regole da cui dipende la
+  logica (unicità, coerenza di importi e date, conferme). In `djkit` allenta `auth.validate_new_password`
+  (nessun validatore) e `it.validate_tax_code` (da 1 a 16 caratteri).
+- `testing.runner.VerboseTestRunner` lo spegne durante i test.
+
+```python
+# settings.py
+DJKIT_RELAXED_VALIDATION = env_bool("DEV_RELAXED_VALIDATION", default=False)
+```
 
 ### 4.9 `mail` — Invio email ✅
 
@@ -793,6 +811,8 @@ minimal_transfers({"anna": Decimal("-700"), "bruno": Decimal("700")})
   - Durante i test sostituisce `PASSWORD_HASHERS` con `password_hashers_for_tests()` (in
     `setup_test_environment`, con `override_settings`) e rimette quelli del progetto in
     `teardown_test_environment`. Vale con ogni verbosità.
+  - Durante i test forza `DJKIT_RELAXED_VALIDATION = False` (`install_strict_validation`, anche nei processi
+    figli di `--parallel`): la suite controlla sempre le regole di produzione.
   - `--parallel N`: `parallel_test_suite = VerboseParallelTestSuite`. Ogni processo figlio installa anche lui gli
     hasher veloci (`_init_worker_with_test_hashers`: con `spawn` / `forkserver`, il default da Python 3.14, il figlio
     non eredita la sostituzione del processo principale) e registra i file eseguiti da ogni test

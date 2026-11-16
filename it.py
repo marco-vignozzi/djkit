@@ -1,8 +1,9 @@
 """
 Italian helpers.
 
-    - Tax code ("codice fiscale"): validate_tax_code, normalize_tax_code. The
-      same rules are meant to be reused by models, admin forms and API
+    - Tax code ("codice fiscale"): validate_tax_code (TaxCodeValidator),
+      normalize_tax_code. With dev.relaxed_validation() on, a tax code may
+      be shorter (1 to 16 letters or digits). The same rules are meant to be reused by models, admin forms and API
       schemas, so a tax code is validated identically everywhere.
     - Formatting of the values put inside Italian texts: format_date
       ("15/03/2026"), format_amount ("1.234,50"), format_percent ("33,33"),
@@ -13,9 +14,13 @@ Italian helpers.
 from datetime import date
 from decimal import Decimal
 
-from django.core.validators import RegexValidator
+import re
+
+from django.core.exceptions import ValidationError
+from django.utils.deconstruct import deconstructible
 from django.utils.functional import lazy
 
+from .dev import relaxed_validation
 from .messages import get_message
 
 # The message is looked up when shown, so the project's text applies
@@ -25,13 +30,48 @@ _lazy_message = lazy(get_message, str)
 # Length of an Italian tax code ("codice fiscale").
 TAX_CODE_LENGTH = 16
 
-# Accepts exactly 16 uppercase letters or digits (values are normalized to
-# uppercase before being validated, see normalize_tax_code).
-validate_tax_code = RegexValidator(
-    regex=rf"^[A-Z0-9]{{{TAX_CODE_LENGTH}}}$",
-    message=_lazy_message("tax_code_invalid", length=TAX_CODE_LENGTH),
-    code="invalid_tax_code",
-)
+# Exactly 16 uppercase letters or digits (values are normalized to uppercase
+# before being validated, see normalize_tax_code); 1 to 16 with relaxed
+# validation (development only).
+TAX_CODE_PATTERN = re.compile(rf"^[A-Z0-9]{{{TAX_CODE_LENGTH}}}$")
+RELAXED_TAX_CODE_PATTERN = re.compile(rf"^[A-Z0-9]{{1,{TAX_CODE_LENGTH}}}$")
+
+
+@deconstructible(path="djkit.it.TaxCodeValidator")
+class TaxCodeValidator:
+    """
+    Validator of an Italian tax code (format only, no check character).
+
+    Raises ValidationError (code "invalid_tax_code", message key
+    "tax_code_invalid") when the value does not match TAX_CODE_PATTERN, or
+    RELAXED_TAX_CODE_PATTERN with dev.relaxed_validation() on.
+    """
+
+    def __call__(self, value) -> None:
+        """
+        Validate one value.
+
+        Args:
+            value: the (normalized) tax code.
+
+        Raises:
+            ValidationError: the value is not a valid tax code.
+        """
+        pattern = RELAXED_TAX_CODE_PATTERN if relaxed_validation() else TAX_CODE_PATTERN
+        if not isinstance(value, str) or not pattern.match(value):
+            raise ValidationError(_lazy_message("tax_code_invalid", length=TAX_CODE_LENGTH), code="invalid_tax_code")
+
+    def __eq__(self, other) -> bool:
+        """All instances are equal (no options), so migrations stay stable."""
+        return isinstance(other, TaxCodeValidator)
+
+    def __hash__(self) -> int:
+        """Hash consistent with __eq__."""
+        return hash(TaxCodeValidator)
+
+
+# The validator used by models, admin forms and API schemas.
+validate_tax_code = TaxCodeValidator()
 
 
 def normalize_tax_code(value: str | None) -> str | None:
