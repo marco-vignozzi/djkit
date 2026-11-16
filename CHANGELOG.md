@@ -6,6 +6,7 @@ All notable changes to djkit. Versions follow semantic versioning
 ## [0.6.0] — unreleased
 
 ### Added
+- `views.spa_index`: catch-all serving the SPA `index.html` (`DJKIT_SPA_INDEX`).
 - `mail`: blocked domains (`DJKIT_MAIL_BLOCKED_DOMAINS`, default
   `RESERVED_DOMAINS` of RFC 2606 / 6761; `blocked_domains`, `is_blocked`):
   `send_email` never writes to them and returns `False` when no recipient

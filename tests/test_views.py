@@ -4,6 +4,10 @@ Tests for djkit.views (Django error views answering with JSON).
 Run with: python manage.py test djkit.tests.test_views
 """
 
+import tempfile
+from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, SimpleTestCase, override_settings
 
 from djkit import views
@@ -72,3 +76,38 @@ class ApiCatchAllTests(ApiTestCase):
     def test_existing_endpoints_are_not_caught(self):
         """GET /api/public/conflict still reaches its endpoint (409)."""
         self.assertStatus(self.client_for().get("/api/public/conflict"), 409)
+
+
+@override_settings(DJKIT_MESSAGES=TEST_MESSAGES)
+class SpaIndexTests(SimpleTestCase):
+    """spa_index serves the SPA index.html, fails loudly when it is missing."""
+
+    def test_serves_the_index_file_without_cache(self):
+        """An existing file -> 200 text/html with its bytes and Cache-Control no-cache."""
+        with tempfile.TemporaryDirectory() as folder:
+            index = Path(folder) / "index.html"
+            index.write_text("<div id=root></div>", encoding="utf-8")
+            with override_settings(DJKIT_SPA_INDEX=index):
+                response = views.spa_index(RequestFactory().get("/properties/3"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/html; charset=utf-8")
+        self.assertEqual(response["Cache-Control"], "no-cache")
+        self.assertEqual(response.content, b"<div id=root></div>")
+
+    def test_missing_file_answers_404_and_logs_an_error(self):
+        """No build -> 404 {'detail': not_found} and an ERROR log line."""
+        with override_settings(DJKIT_SPA_INDEX="/nonexistent/index.html"):
+            with self.assertLogs("djkit.views", level="ERROR"):
+                response = views.spa_index(RequestFactory().get("/"))
+        self.assertEqual(response.status_code, 404)
+        self.assertJSONEqual(response.content, {"detail": "Non trovato."})
+
+    def test_missing_setting_raises_improperly_configured(self):
+        """DJKIT_SPA_INDEX unset -> ImproperlyConfigured."""
+        with override_settings():
+            from django.conf import settings
+
+            if hasattr(settings, "DJKIT_SPA_INDEX"):
+                del settings.DJKIT_SPA_INDEX
+            with self.assertRaises(ImproperlyConfigured):
+                views.spa_index(RequestFactory().get("/"))

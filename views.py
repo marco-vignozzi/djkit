@@ -21,9 +21,24 @@ the JSON 404 under an API prefix in every mode, add `page_not_found` as a
 catch-all route after the API (a path no API route matches ends there):
 
     urlpatterns = [path("api/", api.urls), re_path(r"^api/", page_not_found)]
+
+`spa_index` serves the index.html of a single-page application build for
+every other path, so client-side routes survive a page reload:
+
+    # settings.py
+    DJKIT_SPA_INDEX = BASE_DIR / "frontend" / "dist" / "index.html"
+    # urls.py, last route
+    re_path(r"^", spa_index)
 """
 
-from django.http import JsonResponse
+import logging
+from pathlib import Path
+
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpResponse, JsonResponse
+
+logger = logging.getLogger(__name__)
 
 from .messages import get_message
 
@@ -74,3 +89,35 @@ def page_not_found(request, exception=None) -> JsonResponse:
 def server_error(request) -> JsonResponse:
     """handler500: 500 with the "server_error" message."""
     return error_response("server_error", 500)
+
+
+def spa_index(request) -> HttpResponse:
+    """
+    Catch-all view: the index.html of the single-page application build.
+
+    The file is read on every request (it is small), so a new build is
+    served without restarting the server; `Cache-Control: no-cache` makes
+    browsers check for a new version, while the hashed assets it links stay
+    cacheable.
+
+    Args:
+        request: any request no other route matched.
+
+    Returns:
+        200 text/html with the file, or 404 {"detail": ...} ("not_found")
+        when the file does not exist (the error is logged: the build is
+        missing).
+
+    Raises:
+        ImproperlyConfigured: DJKIT_SPA_INDEX is not set.
+    """
+    index = getattr(settings, "DJKIT_SPA_INDEX", None)
+    if index is None:
+        raise ImproperlyConfigured("DJKIT_SPA_INDEX must point to the index.html of the SPA build.")
+    path = Path(index)
+    if not path.is_file():
+        logger.error("SPA index not found at %s: build the frontend first.", path)
+        return error_response("not_found", 404)
+    response = HttpResponse(path.read_bytes(), content_type="text/html; charset=utf-8")
+    response["Cache-Control"] = "no-cache"
+    return response

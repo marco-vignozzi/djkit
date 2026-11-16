@@ -52,7 +52,7 @@ djkit/
 ├── messages.py          # messaggi per l'utente, per chiave (sostituibili con DJKIT_MESSAGES)
 ├── errors.py            # eccezioni di dominio e conferme
 ├── api.py               # handler HTTP delle eccezioni (anche di Ninja/Pydantic), schemi comuni, decoratori CSRF
-├── views.py             # viste d'errore di Django in JSON (CSRF, 400, 403, 404, 500)
+├── views.py             # viste d'errore di Django in JSON (CSRF, 400, 403, 404, 500) e index.html della SPA
 ├── auth.py              # validazione password, login a sessione, validatori password, link di cambio password
 ├── audit.py             # registro delle operazioni (modello astratto + log_write, campi mascherati)
 ├── updates.py           # modifica parziale di un oggetto
@@ -103,6 +103,7 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 | `DJKIT_AUDIT_EXCLUDED_FIELDS` | `{"password"}` | `audit`, `updates` | campi mai scritti nel registro (né nelle `snapshot`, né nei `diff`); il valore **sostituisce** il default | ✅ |
 | `DJKIT_AUDIT_MASKED_FIELDS` | `frozenset()` | `audit` | campi scritti nel registro con il valore **mascherato** (testo della chiave `audit_masked`; un valore vuoto resta vuoto): si vede che il campo è stato impostato o cambiato, mai il valore. Vale per i campi con quel nome in **ogni** modello (es. dati personali: `{"email", "phone"}`) | ✅ |
 | `DJKIT_MESSAGES` | `{}` | `messages` (e quindi `errors`, `api`, `views`, `auth`, `db`, `updates`) | testi dei messaggi per l'utente, `{chiave: testo}`; le chiavi assenti restano col testo inglese di `DEFAULT_MESSAGES`. Un progetto in un'altra lingua le fornisce **tutte** (vedi §4.0) | ✅ |
+| `DJKIT_SPA_INDEX` | nessuno (obbligatorio per `spa_index`) | `views` | percorso dell'`index.html` della build della SPA | ✅ |
 | `DJKIT_MAIL_DEMO_MODE` | `False` | `mail` | se vero `send_email` non invia e registra nel log destinatari e oggetto (istanze dimostrative) | ✅ |
 | `DJKIT_MAIL_BLOCKED_DOMAINS` | `RESERVED_DOMAINS` | `mail` | domini (e sottodomini) a cui `send_email` non scrive mai; `[]` = nessun blocco | ✅ |
 
@@ -249,6 +250,7 @@ controllo CSRF fallito di `csrf_protect` (per esempio `api.csrf_protected`) e, c
 - `bad_request` → 400 `bad_request`; `permission_denied` → 403 `forbidden`; `page_not_found` → 404 `not_found`;
   `server_error` → 500 `server_error` (per `handler400`/`handler403`/`handler404`/`handler500`).
 - `error_response(key, status) -> JsonResponse`: la risposta comune.
+- `spa_index(request) -> HttpResponse` ✅: rotta finale che serve l'`index.html` della build di una single-page application (percorso in `DJKIT_SPA_INDEX`), così le rotte del client funzionano anche ricaricando la pagina. Il file è letto a ogni richiesta (una nuova build si vede senza riavviare) con `Cache-Control: no-cache`. File assente → 404 `not_found` e una riga di log `ERROR`; setting assente → `ImproperlyConfigured`. Uso: `re_path(r"^", spa_index)` come ultima rotta.
 
 ```python
 # settings.py

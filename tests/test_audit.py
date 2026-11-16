@@ -2,9 +2,10 @@
 Tests for djkit.audit.
 
 A concrete entry model (AuditTestEntry) is defined here, so djkit itself
-keeps no concrete model and no migration. Its table is created in
-setUpClass, inside the class transaction (PostgreSQL DDL is transactional,
-so the rollback removes it).
+keeps no concrete model and no migration. It is registered and its table
+created in setUpClass, inside the class transaction (PostgreSQL DDL is
+transactional, so the rollback removes it); outside those classes it is not
+registered, so deleting a user elsewhere never looks for its table.
 
 Run with: python manage.py test djkit.tests.test_audit
 """
@@ -54,6 +55,37 @@ class AuditTestEntry(AuditEntryBase):
 
     class Meta(AuditEntryBase.Meta):
         app_label = "djkit"
+
+
+def unregister_audit_test_entry():
+    """
+    Removes AuditTestEntry from the app registry.
+
+    Its `actor` FK makes every User deletion look for its table, which exists
+    only inside the classes below: other modules (e.g. a test deleting users)
+    would fail with "relation does not exist". So the model is registered
+    only while those classes run.
+    """
+    apps.all_models["djkit"].pop("audittestentry", None)
+    apps.clear_cache()
+
+
+def use_audit_test_entry(test_class):
+    """
+    Registers AuditTestEntry and creates its table for one TestCase class.
+
+    Args:
+        test_class: the TestCase class, inside its setUpClass (after super()):
+            the table is removed by the class rollback, the registration by
+            the class cleanup.
+    """
+    apps.register_model("djkit", AuditTestEntry)
+    test_class.addClassCleanup(unregister_audit_test_entry)
+    with connection.schema_editor() as editor:
+        editor.create_model(AuditTestEntry)
+
+
+unregister_audit_test_entry()
 
 
 class JsonValueTests(SimpleTestCase):
@@ -115,10 +147,9 @@ class LogWriteTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        """Register AuditTestEntry and create its table (removed by the class rollback)."""
         super().setUpClass()
-        with connection.schema_editor() as editor:
-            editor.create_model(AuditTestEntry)
+        use_audit_test_entry(cls)
 
     def setUp(self):
         """A user and a group to log changes about."""
@@ -242,10 +273,9 @@ class LogWriteMaskingTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        """Register AuditTestEntry and create its table (removed by the class rollback)."""
         super().setUpClass()
-        with connection.schema_editor() as editor:
-            editor.create_model(AuditTestEntry)
+        use_audit_test_entry(cls)
 
     def test_snapshot_and_diff_masked(self):
         """CREATE of group 'red' -> {'name': '[omesso]'}; UPDATE red -> blue -> ['[omesso]', '[omesso]']."""
@@ -264,10 +294,9 @@ class LastLoggedAtTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        """Register AuditTestEntry and create its table (removed by the class rollback)."""
         super().setUpClass()
-        with connection.schema_editor() as editor:
-            editor.create_model(AuditTestEntry)
+        use_audit_test_entry(cls)
 
     def test_newest_per_object_only_among_the_given_entries(self):
         """red: two NOTIFY -> the newer; blue: only an UPDATE -> missing when filtering NOTIFY; green not asked."""
@@ -287,10 +316,9 @@ class CooldownTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        """Register AuditTestEntry and create its table (removed by the class rollback)."""
         super().setUpClass()
-        with connection.schema_editor() as editor:
-            editor.create_model(AuditTestEntry)
+        use_audit_test_entry(cls)
 
     def setUp(self):
         """A user, two groups and the NOTIFY entries as the sends that count."""
@@ -355,10 +383,9 @@ class RateLimitTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Create the table of AuditTestEntry (removed by the class rollback)."""
+        """Register AuditTestEntry and create its table (removed by the class rollback)."""
         super().setUpClass()
-        with connection.schema_editor() as editor:
-            editor.create_model(AuditTestEntry)
+        use_audit_test_entry(cls)
 
     def entries(self, *ages_seconds):
         """One CREATE entry on Group 1 per age (seconds ago), as a QuerySet."""
