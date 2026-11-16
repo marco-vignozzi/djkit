@@ -61,6 +61,7 @@ djkit/
 ├── db.py                # QuerySet con filtro di accesso, eliminazione logica, subquery, controllo di unicità
 ├── dates.py             # date mensili, anniversari annuali
 ├── deadlines.py         # registro delle scadenze di un progetto (calendario, notifiche)
+├── notices.py           # avvisi delle scadenze: preferenze per utente, già avvisati, finestre
 ├── validators.py        # normalizzazione di dati personali generici e dei testi in ingresso
 ├── it.py                # dati italiani: codice fiscale
 ├── mail.py              # invio email (testi da template) con modalità demo
@@ -618,6 +619,38 @@ registry.collect(user, date(2026, 6, 1), date(2026, 6, 30))
 ```python
 urgency(date(2026, 6, 15), date(2026, 6, 10), [(7, "this_week"), (30, "this_month")], overdue="overdue")
 # -> "this_week"
+```
+
+### 4.7b `notices` — Avvisi delle scadenze ✅
+
+Avvisare ogni utente, per email, delle scadenze dei prossimi giorni lette da un `DeadlineRegistry`, con preferenze
+per utente e senza ripetere ciò che è già stato avvisato. Il progetto scrive i modelli concreti, l'email e il job.
+
+- `NoticeRule(enabled, days_before)` (dataclass immutabile): avvisare o no un tipo, e con quanti giorni di anticipo
+  (la finestra va da oggi a oggi + `days_before`; 0 = solo le scadenze di oggi). `MAX_DAYS_BEFORE = 366`.
+- `rules(defaults, saved) -> dict[str, NoticeRule]`: le regole in vigore, i default del progetto sostituiti da ciò che
+  l'utente ha salvato (`(kind, enabled, days_before)`); i tipi che non sono tra i default si ignorano.
+- `deadline_key(deadline) -> (kind, subject, subject_id)`: ciò che identifica una scadenza nel tempo (non la data, che
+  può spostarsi o tornare ogni anno).
+- `to_notify(registry, user, today, rules, sent) -> list[Deadline]`: le scadenze dell'avviso di oggi: ogni tipo attivo
+  nella sua finestra, tolte quelle già avvisate per la stessa data (`sent`: `{deadline_key: data avvisata}`); una
+  data nuova della stessa scadenza (un rinnovo annuale, una scadenza spostata) si avvisa di nuovo.
+- `sent_for(model, user)`, `record(model, user, deadlines, when)` (una riga per scadenza, **sovrascritta** se esiste
+  già), `prune(model, today) -> int` (cancella le righe di scadenze già passate: la tabella tiene solo quelle delle
+  finestre di avviso).
+- Modelli astratti (FK all'utente `PROTECT`):
+  - `NoticePreferenceBase`: `user`, `kind`, `enabled`, `days_before`; unico (`user`, `kind`), vincolo
+    `"<app>_<class>_unique_kind"` (`unique_constraint(name)` per chi ridefinisce `Meta.constraints`);
+  - `DeadlineNoticeBase`: `user`, `kind`, `subject`, `subject_id`, `due_date`, `notified_at`; unico (`user`, `kind`,
+    `subject`, `subject_id`), vincolo `"<app>_<class>_unique_deadline"` (`unique_constraint(name)`).
+
+```python
+prune(DeadlineNotice, today)
+for user in recipients:
+    found = to_notify(registry, user, today, rules(DEFAULTS, saved_of(user)), sent_for(DeadlineNotice, user))
+    if found:
+        send_summary(user, found)
+        record(DeadlineNotice, user, found, timezone.now())
 ```
 
 ### 4.8 `validators` e `it` — Dati personali ✅

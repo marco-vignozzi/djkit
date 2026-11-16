@@ -6,6 +6,9 @@ All notable changes to djkit. Versions follow semantic versioning
 ## [0.6.0] — unreleased
 
 ### Added
+- `notices`: deadline notices (`NoticeRule`, `rules`, `deadline_key`,
+  `to_notify`, `sent_for`, `record`, `prune`, `MAX_DAYS_BEFORE`) and the
+  abstract models `NoticePreferenceBase` and `DeadlineNoticeBase`.
 - `access`: one access policy (`AccessPolicy`, setting `DJKIT_ACCESS_POLICY`)
   with `Action` (`READ`, `WRITE`), `AccessLevel` (`FULL`, `READ_ONLY`),
   `get_policy`, `scope`, `level`, `check`; `get_accessible_or_404` takes
