@@ -33,7 +33,9 @@ from .errors import Conflict
 from .messages import get_message
 
 
-def ensure_unique(model: type[models.Model], values: dict, exclude_pk=None, messages: dict | None = None) -> None:
+def ensure_unique(
+    source: "type[models.Model] | models.QuerySet", values: dict, exclude_pk=None, messages: dict | None = None
+) -> None:
     """
     Check that no other row already uses the given values.
 
@@ -41,7 +43,9 @@ def ensure_unique(model: type[models.Model], values: dict, exclude_pk=None, mess
     separate unique fields), and every field already taken is reported.
 
     Args:
-        model: the model class (or a QuerySet's model) to search.
+        source: the model class (every row is searched), or a QuerySet
+            when the values must be unique only inside a subset of rows
+            (e.g. a partial unique constraint: only the active rows).
         values: {field name: value}, already normalized as they will be
             saved; None values are skipped.
         exclude_pk: primary key of the row being updated, which may keep
@@ -54,7 +58,10 @@ def ensure_unique(model: type[models.Model], values: dict, exclude_pk=None, mess
             `detail` joins the distinct messages.
     """
     messages = messages or {}
-    others = model._default_manager.all()
+    if isinstance(source, type) and issubclass(source, models.Model):
+        others = source._default_manager.all()
+    else:
+        others = source.all()
     if exclude_pk is not None:
         others = others.exclude(pk=exclude_pk)
     taken = {

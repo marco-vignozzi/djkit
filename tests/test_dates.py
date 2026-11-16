@@ -17,12 +17,15 @@ class ClampedDateTests(SimpleTestCase):
     """clamped_date keeps valid days and clamps missing ones."""
 
     def test_existing_day_unchanged(self):
+        """15/3/2026 exists -> unchanged."""
         self.assertEqual(clamped_date(2026, 3, 15), date(2026, 3, 15))
 
     def test_day_31_in_30_day_month(self):
+        """31 April -> 30/4/2026."""
         self.assertEqual(clamped_date(2026, 4, 31), date(2026, 4, 30))
 
     def test_february_non_leap_and_leap(self):
+        """30 February -> 28/2/2026, 29/2/2028 (leap year)."""
         self.assertEqual(clamped_date(2026, 2, 30), date(2026, 2, 28))
         self.assertEqual(clamped_date(2028, 2, 30), date(2028, 2, 29))
 
@@ -31,15 +34,19 @@ class AddMonthsTests(SimpleTestCase):
     """add_months handles the year rollover."""
 
     def test_same_year(self):
+        """March + 1 -> April 2026."""
         self.assertEqual(add_months(2026, 3, 1), (2026, 4))
 
     def test_zero_months(self):
+        """March + 0 -> March 2026."""
         self.assertEqual(add_months(2026, 3, 0), (2026, 3))
 
     def test_december_to_january(self):
+        """December 2026 + 1 -> January 2027."""
         self.assertEqual(add_months(2026, 12, 1), (2027, 1))
 
     def test_many_months(self):
+        """November 2026 + 14 -> January 2028."""
         self.assertEqual(add_months(2026, 11, 14), (2028, 1))
 
 
@@ -86,9 +93,11 @@ class MonthlyDueDatesTests(SimpleTestCase):
         )
 
     def test_full_year_has_twelve_dates(self):
+        """1/1-31/12/2026 -> 12 due dates."""
         self.assertEqual(len(monthly_due_dates(date(2026, 1, 1), date(2026, 12, 31))), 12)
 
     def test_end_before_start_gives_nothing(self):
+        """End 30/4 before start 1/5 -> no due dates."""
         self.assertEqual(monthly_due_dates(date(2026, 5, 1), date(2026, 4, 30)), [])
 
 

@@ -511,7 +511,9 @@ customer.mark_deleted()                               # eliminazione logica
 - `date_filter(field: str, as_of: date | Expression | OuterRef | None) -> Q`: restituisce `Q(field__lte=as_of)`,
   oppure `Q()` vuoto se `as_of` è `None`. `as_of` può essere un'espressione, per una data che cambia da riga a riga
   (es. `OuterRef("reference_date")` dentro una subquery correlata).
-- `ensure_unique(model, values: dict, exclude_pk=None, messages: dict | None = None) -> None`: controlla ogni campo
+- `ensure_unique(source, values: dict, exclude_pk=None, messages: dict | None = None) -> None`: `source` è la classe
+  del modello (si cercano tutte le righe) o un QuerySet, quando i valori devono essere unici solo in un sottoinsieme
+  (es. un vincolo unico parziale: solo le righe attive). Controlla ogni campo
   di `values` (già normalizzato; i `None` sono saltati) e, se un'altra riga usa già quel valore, solleva
   `Conflict(errors={campo: [messaggio]})` con tutti i campi occupati; `detail` unisce i messaggi distinti.
   `exclude_pk` esclude la riga in modifica; `messages` (`{campo: testo}`) sostituisce, per i campi indicati, il
@@ -519,6 +521,7 @@ customer.mark_deleted()                               # eliminazione logica
 
 ```python
 ensure_unique(Customer, {"email": email, "vat_number": vat}, exclude_pk=customer.pk)
+ensure_unique(Customer.objects.filter(is_active=True), {"email": email})  # unico solo tra i clienti attivi
 ```
 
 ### 4.7 `dates` — Date mensili e annuali ✅
@@ -674,6 +677,15 @@ minimal_transfers({"anna": Decimal("-700"), "bruno": Decimal("700")})
   - Durante i test sostituisce `PASSWORD_HASHERS` con `password_hashers_for_tests()` (in
     `setup_test_environment`, con `override_settings`) e rimette quelli del progetto in
     `teardown_test_environment`. Vale con ogni verbosità.
+  - `--parallel N`: `parallel_test_suite = VerboseParallelTestSuite`. Ogni processo figlio installa anche lui gli
+    hasher veloci (`_init_worker_with_test_hashers`: con `spawn` / `forkserver`, il default da Python 3.14, il figlio
+    non eredita la sostituzione del processo principale) e registra i file eseguiti da ogni test
+    (`TrackingRemoteTestResult`), che arrivano al processo principale con l'evento `addSourceFiles` prima di
+    `stopTest`. Le righe escono una classe di test alla volta, man mano che i processi le finiscono. Per vedere i
+    traceback dei test falliti in parallelo serve il pacchetto `tblib` (senza, Django non riesce a trasmetterli).
+- `install_test_password_hashers() -> override_settings | None`: sostituisce `PASSWORD_HASHERS` con
+  `password_hashers_for_tests()` e salva quelli del progetto per `project_password_hashers()`; restituisce l'override
+  attivo (o `None` se il setting è `None`). Lo usano il runner e i processi figli.
 - `DEFAULT_TEST_PASSWORD_HASHERS`: `("django.contrib.auth.hashers.MD5PasswordHasher",)`, un hash veloce. Le password
   di test non sono segrete; i hasher di produzione sono lenti apposta e ogni utente creato nei test ne pagherebbe il
   costo.

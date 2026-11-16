@@ -6,6 +6,14 @@ All notable changes to djkit. Versions follow semantic versioning
 ## [0.6.0] — unreleased
 
 ### Added
+- `testing.runner`: `--parallel N` works with `VerboseTestRunner`. The
+  worker processes install the fast test password hashers too
+  (`VerboseParallelTestSuite`, `install_test_password_hashers`) and send
+  the source files of each test to the main process
+  (`TrackingRemoteTestResult`, event `addSourceFiles`).
+- `db.ensure_unique` accepts a QuerySet instead of the model class, to
+  check uniqueness inside a subset of rows (e.g. a partial unique
+  constraint).
 - `numbers.split_by_weights(total, weights, step)`: proportional parts
   that add up exactly to the total (largest remainder method).
 - `numbers.minimal_transfers(balances)`: the fewest transfers that bring

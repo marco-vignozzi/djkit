@@ -24,6 +24,13 @@ Verbosity (`-v`):
 `--debug-sql` and `--pdb` keep Django's own result classes, since they
 already add their own output.
 
+`--parallel N` works too: every worker process installs the fast test
+password hashers and tracks the source files of its own tests, which reach
+the main process with the other test events ("addSourceFiles"). Lines are
+printed one test class at a time, as each worker finishes it. Install
+`tblib` to see the tracebacks of failing tests in parallel runs (without
+it, Django cannot send them from the workers).
+
 Settings (all optional):
     DJKIT_TEST_EXCLUDED_DIRS  -> path parts never reported as code under test
                                  (default: DEFAULT_EXCLUDED_DIRS). The package
@@ -44,7 +51,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.management.color import color_style
-from django.test.runner import DiscoverRunner
+from django.test.runner import DiscoverRunner, ParallelTestSuite, RemoteTestResult, RemoteTestRunner, _init_worker
 from django.test.utils import override_settings
 
 # Default path parts / file names that are never reported as "code under
@@ -325,6 +332,9 @@ class VerboseTextTestResult(unittest.TextTestResult):
         self._reset_current()
         self.counts = dict.fromkeys(OUTCOMES, 0)
         self.tracker = SourceTracker(Path(settings.BASE_DIR))
+        # Source files sent by a worker process for the running test
+        # (parallel runs); None when the test ran in this process.
+        self._remote_files = None
 
     # -- helpers -----------------------------------------------------------
 
@@ -334,6 +344,7 @@ class VerboseTextTestResult(unittest.TextTestResult):
         self._outcome = "pass"
         self._duration = None
         self._reason = ""
+        self._remote_files = None
 
     def _set_outcome(self, test, outcome, reason=""):
         """
@@ -408,6 +419,8 @@ class VerboseTextTestResult(unittest.TextTestResult):
     def stopTest(self, test):
         """Print the line of `test` with outcome, duration and source files."""
         files = self.tracker.stop()
+        if self._remote_files is not None:
+            files = self._remote_files
         super().stopTest(test)
         if test is self._test:
             self.counts[self._outcome] += 1
@@ -428,6 +441,18 @@ class VerboseTextTestResult(unittest.TextTestResult):
         super().addDuration(test, elapsed)
         if test is self._test:
             self._duration = elapsed
+
+    def addSourceFiles(self, test, files):
+        """
+        Store the source files a worker process tracked for `test`
+        (event sent by TrackingRemoteTestResult in parallel runs).
+
+        Args:
+            test: the test case the files belong to.
+            files: project source files run by the test.
+        """
+        if test is self._test:
+            self._remote_files = list(files)
 
     def addSuccess(self, test):
         """Mark the test as passed."""
@@ -483,27 +508,103 @@ class VerboseTextTestResult(unittest.TextTestResult):
         super().printErrors()
 
 
+def install_test_password_hashers():
+    """
+    Replace PASSWORD_HASHERS with password_hashers_for_tests(), saving the
+    project's own ones for project_password_hashers().
+
+    Returns:
+        The enabled override_settings (to disable it later), or None when
+        DJKIT_TEST_PASSWORD_HASHERS is None (project hashers kept).
+    """
+    global _project_password_hashers
+    hashers = password_hashers_for_tests()
+    if hashers is None:
+        return None
+    _project_password_hashers = list(settings.PASSWORD_HASHERS)
+    # override_settings also sends setting_changed, which clears Django's
+    # cache of the hasher instances.
+    override = override_settings(PASSWORD_HASHERS=hashers)
+    override.enable()
+    return override
+
+
+def _init_worker_with_test_hashers(counter, *args, **kwargs):
+    """
+    Set up a worker process of a parallel run: Django's own setup (its test
+    database, settings), then the fast test password hashers, which a
+    spawned or forkserver process would not inherit from the main one. The
+    override lives as long as the worker. Module-level because of the
+    multiprocessing module's requirements.
+
+    Args:
+        counter, *args, **kwargs: those of django.test.runner._init_worker.
+    """
+    _init_worker(counter, *args, **kwargs)
+    install_test_password_hashers()
+
+
+class TrackingRemoteTestResult(RemoteTestResult):
+    """
+    Result of a worker process of a parallel run that also tracks, with
+    SourceTracker, the project source files every test runs, and sends
+    them to the main process as an "addSourceFiles" event before
+    "stopTest" (handled by VerboseTextTestResult.addSourceFiles).
+    """
+
+    def __init__(self, *args, **kwargs):
+        """Same arguments as RemoteTestResult."""
+        super().__init__(*args, **kwargs)
+        self.tracker = SourceTracker(Path(settings.BASE_DIR))
+
+    def startTest(self, test):
+        """Start tracking the source files of `test`."""
+        super().startTest(test)
+        self.tracker.start()
+
+    def stopTest(self, test):
+        """Send the tracked source files, then the usual stopTest event."""
+        self.events.append(("addSourceFiles", self.test_index, self.tracker.stop()))
+        super().stopTest(test)
+
+    def stopTestRun(self):
+        """Release the source tracker at the end of the subsuite."""
+        self.tracker.close()
+        super().stopTestRun()
+
+
+class TrackingRemoteTestRunner(RemoteTestRunner):
+    """RemoteTestRunner that uses TrackingRemoteTestResult."""
+
+    resultclass = TrackingRemoteTestResult
+
+
+class VerboseParallelTestSuite(ParallelTestSuite):
+    """
+    ParallelTestSuite whose workers install the fast test password hashers
+    and track the source files of their tests.
+    """
+
+    init_worker = _init_worker_with_test_hashers
+    runner_class = TrackingRemoteTestRunner
+
+
 class VerboseTestRunner(DiscoverRunner):
     """
     Django test runner that uses VerboseTextTestResult.
 
     Falls back to Django's own result classes with `-v 0`, `--debug-sql`
     or `--pdb`. While the tests run, PASSWORD_HASHERS is replaced by
-    password_hashers_for_tests() (see DEFAULT_TEST_PASSWORD_HASHERS).
+    password_hashers_for_tests() (see DEFAULT_TEST_PASSWORD_HASHERS), also
+    in the worker processes of `--parallel` (VerboseParallelTestSuite).
     """
+
+    parallel_test_suite = VerboseParallelTestSuite
 
     def setup_test_environment(self, **kwargs):
         """Django's test environment, plus the fast test password hashers."""
-        global _project_password_hashers
         super().setup_test_environment(**kwargs)
-        self._hashers_override = None
-        hashers = password_hashers_for_tests()
-        if hashers is not None:
-            _project_password_hashers = list(settings.PASSWORD_HASHERS)
-            # override_settings also sends setting_changed, which clears
-            # Django's cache of the hasher instances.
-            self._hashers_override = override_settings(PASSWORD_HASHERS=hashers)
-            self._hashers_override.enable()
+        self._hashers_override = install_test_password_hashers()
 
     def teardown_test_environment(self, **kwargs):
         """Restore the project's password hashers, then Django's teardown."""

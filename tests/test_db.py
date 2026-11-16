@@ -54,6 +54,12 @@ class EnsureUniqueTests(TestCase):
         self.assertEqual(caught.exception.extra["errors"], {"name": ["Name taken."]})
         self.assertEqual(caught.exception.detail, "Name taken.")
 
+    def test_queryset_limits_the_rows_searched(self):
+        """'sales' searched without the 'sales' row -> free; 'staff' among the groups starting with 's' -> Conflict."""
+        ensure_unique(Group.objects.exclude(name="sales"), {"name": "sales"})
+        with self.assertRaises(Conflict):
+            ensure_unique(Group.objects.filter(name__startswith="s"), {"name": "staff"})
+
 
 class DateFilterTests(SimpleTestCase):
     """date_filter builds an optional 'on or before' condition."""

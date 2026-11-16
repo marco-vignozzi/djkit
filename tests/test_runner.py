@@ -5,6 +5,8 @@ exercised by every test run).
 Run with: python manage.py test djkit.tests.test_runner
 """
 
+import io
+import unittest
 from pathlib import Path
 
 from django.conf import settings
@@ -136,3 +138,36 @@ class PasswordHashersForTestsTests(SimpleTestCase):
         self.assertEqual(settings.PASSWORD_HASHERS, hashers)
         self.assertIsNotNone(runner._project_password_hashers)
         self.assertEqual(project_password_hashers(), runner._project_password_hashers)
+
+
+class ParallelRunTests(SimpleTestCase):
+    """--parallel: workers set up the test hashers and send the source files of each test."""
+
+    def test_parallel_suite_uses_the_tracking_workers(self):
+        """VerboseTestRunner.parallel_test_suite -> workers with the test hashers and TrackingRemoteTestRunner."""
+        suite = runner.VerboseTestRunner.parallel_test_suite
+        self.assertIs(suite, runner.VerboseParallelTestSuite)
+        self.assertIs(suite.init_worker, runner._init_worker_with_test_hashers)
+        self.assertIs(suite.runner_class.resultclass, runner.TrackingRemoteTestResult)
+
+    def test_source_files_event_comes_before_stop_test(self):
+        """A worker result records ("addSourceFiles", index, files) just before ("stopTest", index)."""
+        result = runner.TrackingRemoteTestResult()
+        result.startTest(self)
+        result.addSuccess(self)
+        result.stopTest(self)
+        result.stopTestRun()
+        names = [event[0] for event in result.events]
+        self.assertEqual(names[-3:], ["addSourceFiles", "stopTest", "stopTestRun"])
+        self.assertIsInstance(result.events[-3][2], list)
+
+    def test_main_result_prints_the_files_sent_by_the_worker(self):
+        """VerboseTextTestResult: addSourceFiles(["shop/orders.py"]) -> the line lists that file."""
+        stream = unittest.runner._WritelnDecorator(io.StringIO())
+        result = runner.VerboseTextTestResult(stream, descriptions=True, verbosity=1)
+        result.startTest(self)
+        result.addSourceFiles(self, ["shop/orders.py"])
+        result.addSuccess(self)
+        result.stopTest(self)
+        result.stopTestRun()
+        self.assertIn("shop/orders.py", stream.getvalue())

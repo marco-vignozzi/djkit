@@ -6,6 +6,7 @@ djkit/tests/urls.py.
 Run with: python manage.py test djkit.tests.test_api
 """
 
+from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.test import SimpleTestCase, override_settings
 
@@ -251,6 +252,6 @@ class MakeUserTests(ApiTestCase):
         self.assertNotEqual(first.password, "pw-1")
 
     def test_overrides_replace_placeholders(self):
-        """first_name override -> stored as given."""
-        user = make_user(first_name="Bruno")
-        self.assertEqual(user.first_name, "Bruno")
+        """USERNAME_FIELD override "bruno@example.com" -> stored as given (whatever the user model)."""
+        user = make_user(**{get_user_model().USERNAME_FIELD: "bruno@example.com"})
+        self.assertEqual(user.get_username(), "bruno@example.com")
