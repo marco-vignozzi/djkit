@@ -15,6 +15,9 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import models
 from django.test import Client, TestCase
+from django.urls import Resolver404, resolve
+
+from djkit.views import page_not_found
 from django.utils.crypto import get_random_string
 
 JSON = "application/json"
@@ -140,11 +143,21 @@ class ApiTestCase(TestCase):
         Assert that a request about someone else's object answers 404
         (never 403: the API must not reveal that the object exists).
 
+        The path must match a route: a URL that no longer exists answers 404
+        too (also through a catch-all djkit.views.page_not_found), and the
+        test would pass without checking anything.
+
         Args:
             client: client of the user who must not access the object.
             method: "get", "post", "put", "patch" or "delete".
             path: URL of the object.
             data: optional body (query string for GET).
         """
+        try:
+            match = resolve(path.split("?", 1)[0])
+        except Resolver404:
+            match = None
+        if match is None or match.func is page_not_found:
+            self.fail(f"{path} matches no route: the 404 would not prove anything")
         response = getattr(client, method.lower())(path, data)
         self.assertStatus(response, 404)

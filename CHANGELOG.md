@@ -15,6 +15,9 @@ All notable changes to djkit. Versions follow semantic versioning
   (keyed hash of the address) for the abuse limits of public endpoints.
 - `audit.rate_limit_until(entries, limit, window_seconds)`: at most N
   actions in a time window, counted on the log.
+- `numbers.round_half_up(value, step=CENT)`: halves away from zero.
+- `it.format_date`, `format_amount`, `format_percent`, `format_names`:
+  Italian formats of the values put inside texts.
 - `notices`: deadline notices (`NoticeRule`, `rules`, `deadline_key`,
   `to_notify`, `sent_for`, `record`, `prune`, `MAX_DAYS_BEFORE`) and the
   abstract models `NoticePreferenceBase` and `DeadlineNoticeBase`.
@@ -55,6 +58,11 @@ All notable changes to djkit. Versions follow semantic versioning
   (default 60).
 - `errors.TooManyRequests(retry_at)` -> 429 with `retry_at`;
   `api.ErrorOut.retry_at`.
+
+### Changed
+- `testing.api.ApiTestCase.assertNotAccessible` fails when the path
+  matches no route (or only the catch-all `views.page_not_found`): a
+  removed URL answered 404 too and made the test pass without checking.
 
 ### Documentation
 - `views.page_not_found` as the catch-all route after the API: a JSON 404

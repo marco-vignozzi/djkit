@@ -660,7 +660,7 @@ for user in recipients:
         record(DeadlineNotice, user, found, timezone.now())
 ```
 
-### 4.8 `validators` e `it` — Dati personali ✅
+### 4.8 `validators` e `it` — Dati personali e formati italiani ✅
 
 - `validators.normalize_email_address(value: str | None) -> str | None`: toglie gli spazi e converte in minuscolo.
 - `validators.strip_text_values(data: dict) -> dict`: copia di `data` con gli spazi tolti attorno a ogni valore
@@ -670,6 +670,12 @@ for user in recipients:
 - `it.validate_tax_code`: `RegexValidator` che accetta esattamente 16 lettere maiuscole o cifre
   (codice `invalid_tax_code`). Il messaggio è la chiave `tax_code_invalid` (`{length}`), letta quando viene mostrato.
 - `it.normalize_tax_code(value: str | None) -> str | None`: toglie gli spazi e converte in maiuscolo.
+- Formati dei valori dentro i testi in italiano (un frontend che formatta con `Intl` in `it-IT` ottiene lo stesso
+  risultato):
+  - `it.format_date(value: date) -> str`: `"15/03/2026"`.
+  - `it.format_amount(value: Decimal) -> str`: `"1.234,50"` (senza simbolo).
+  - `it.format_percent(value: Decimal) -> str`: `"50"`, `"33,33"` (senza simbolo e senza zeri inutili).
+  - `it.format_names(names) -> str`: `"Anna"`, `"Anna e Bruno"`, `"Anna, Bruno e Carla"`.
 
 ### 4.9 `mail` — Invio email ✅
 
@@ -762,6 +768,7 @@ CATALOG.text("ui.cart.items", count=3)    # "3 articoli"
   `step` e gli `step` che avanzano vanno alle parti con il resto scartato più grande (a parità, le prime). La somma è
   sempre esattamente `total`. Esempio: 100 per `[1, 1, 1]` → `[33.34, 33.33, 33.33]`. Nessun peso, un peso negativo,
   pesi tutti 0 o `total` non multiplo di `step` → `ValueError`.
+- `round_half_up(value: Decimal, step: Decimal = CENT) -> Decimal`: arrotonda a `step` con le metà verso l'alto (lontano da zero), come i moduli fiscali e le fatture: `103.008` → `103.01`, `0.125` → `0.13`. `Decimal.quantize` da solo arrotonda le metà al pari (`0.125` → `0.12`).
 - `minimal_transfers(balances: Mapping[K, Decimal]) -> list[tuple[K, K, Decimal]]`: i trasferimenti `(chi paga, chi
   riceve, importo)` che azzerano dei saldi (> 0 deve ricevere, < 0 deve dare), nel minor numero di passaggi: il
   minimo è *n − g*, con *n* saldi non nulli e *g* il massimo numero di gruppi disgiunti a somma zero; ogni gruppo si
@@ -828,7 +835,7 @@ minimal_transfers({"anna": Decimal("-700"), "bruno": Decimal("700")})
     se `user` è indicato.
   - `assertStatus(response, status)`: se lo status è diverso, il messaggio di errore mostra il corpo
     della risposta.
-  - `assertNotAccessible(client, method, path, data=None)`: verifica che la risposta sia 404 e mai 403,
+  - `assertNotAccessible(client, method, path, data=None)`: verifica che il percorso corrisponda a una rotta vera (un indirizzo che non esiste più risponderebbe 404 anche lui, pure tramite la rotta di riserva `views.page_not_found`, e il test passerebbe senza controllare niente) e che la risposta sia 404 e mai 403,
     per i test di isolamento.
 
 ---

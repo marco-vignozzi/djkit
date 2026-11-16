@@ -8,10 +8,13 @@ Number helpers.
       remainder method).
     - minimal_transfers: the fewest transfers that bring a set of balances
       (adding up to zero) to zero.
+    - round_half_up: round to a step (cents by default) with halves going
+      up, as tax forms and invoices do (Decimal.quantize alone rounds
+      halves to even).
 """
 
 from collections.abc import Hashable, Mapping, Sequence
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import TypeVar
 
 # Key of a balance in minimal_transfers (any hashable value).
@@ -19,6 +22,20 @@ K = TypeVar("K", bound=Hashable)
 
 # Default precision of split_evenly: cents.
 CENT = Decimal("0.01")
+
+
+def round_half_up(value: Decimal, step: Decimal = CENT) -> Decimal:
+    """
+    Round a value to a step, halves away from zero.
+
+    Args:
+        value: the amount.
+        step: the precision, e.g. Decimal("0.01").
+
+    Returns:
+        The rounded value: 103.008 -> 103.01, 0.125 -> 0.13, -0.125 -> -0.13.
+    """
+    return value.quantize(step, rounding=ROUND_HALF_UP)
 
 
 def split_evenly(total: Decimal, parts: int, step: Decimal = CENT) -> list[Decimal]:

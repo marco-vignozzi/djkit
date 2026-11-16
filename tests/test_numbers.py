@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from django.test import SimpleTestCase
 
-from djkit.numbers import minimal_transfers, split_by_weights, split_evenly
+from djkit.numbers import minimal_transfers, round_half_up, split_by_weights, split_evenly
 
 
 class SplitEvenlyTests(SimpleTestCase):
@@ -102,3 +102,14 @@ class MinimalTransfersTests(SimpleTestCase):
         """a -1, b +2 -> ValueError."""
         with self.assertRaises(ValueError):
             minimal_transfers({"a": Decimal(-1), "b": Decimal(2)})
+
+
+class RoundHalfUpTests(SimpleTestCase):
+    """round_half_up(): halves away from zero, unlike Decimal.quantize."""
+
+    def test_halves_go_up_and_negative_halves_go_down(self):
+        """103.008 -> 103.01; 0.125 -> 0.13 (quantize alone: 0.12); -0.125 -> -0.13; step 1: 2.5 -> 3."""
+        self.assertEqual(round_half_up(Decimal("103.008")), Decimal("103.01"))
+        self.assertEqual(round_half_up(Decimal("0.125")), Decimal("0.13"))
+        self.assertEqual(round_half_up(Decimal("-0.125")), Decimal("-0.13"))
+        self.assertEqual(round_half_up(Decimal("2.5"), Decimal("1")), Decimal("3"))
