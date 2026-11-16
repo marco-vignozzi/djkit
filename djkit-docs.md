@@ -57,7 +57,7 @@ djkit/
 ├── audit.py             # registro delle operazioni (modello astratto + log_write, campi mascherati)
 ├── updates.py           # modifica parziale di un oggetto
 ├── fields.py            # campi a scelta, importi, vincoli CHECK
-├── access.py            # lettura di un oggetto accessibile all'utente, o 404
+├── access.py            # permessi: policy unica, scope / check / get_accessible_or_404 (404 o 403)
 ├── db.py                # QuerySet con filtro di accesso, eliminazione logica, subquery, controllo di unicità
 ├── dates.py             # date mensili, anniversari annuali
 ├── deadlines.py         # registro delle scadenze di un progetto (calendario, notifiche)
@@ -93,6 +93,7 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 
 | Setting | Default | Usato da | Significato | Stato |
 |---|---|---|---|---|
+| `DJKIT_ACCESS_POLICY` | `None` (`AccessPolicy`: lettura e scrittura seguono `accessible_by`) | `access` | percorso puntato della sottoclasse di `access.AccessPolicy` con le regole del progetto | ✅ |
 | `DJKIT_COOLDOWN_SECONDS` | `60` | `audit` | secondi minimi tra due invii verso l'esterno a proposito dello stesso oggetto (`ensure_cooldown`, `cooldown_until`); `0` = nessun blocco, negativo → `ImproperlyConfigured` | ✅ |
 | `DJKIT_TEST_EXCLUDED_DIRS` | `{"tests", "migrations", ".venv", "venv", "site-packages"}` | `testing.runner` | parti di percorso mai mostrate come "codice sotto test"; il valore **sostituisce** il default. Le cartelle del modulo settings (da `SETTINGS_MODULE`, es. `config` per `config.settings`) sono sempre escluse in aggiunta | ✅ |
 | `DJKIT_TEST_EXCLUDED_FILES` | `{"tests.py", "factories.py", "apps.py", "admin.py", "__init__.py"}` | `testing.runner` | nomi di file mai mostrati come "codice sotto test"; il valore **sostituisce** il default | ✅ |
@@ -157,6 +158,7 @@ I service sollevano queste eccezioni senza conoscere HTTP. Le traduce in rispost
 | Nome | Status HTTP | `message_key` (testo inglese) | Quando |
 |---|---|---|---|
 | `DomainError(detail=None, **extra)` | 400 | `domain_error` (`Request failed.`) | classe base |
+| `Forbidden` | 403 | `read_only` (`You can only consult this item: you cannot change it.`) | l'utente vede l'oggetto ma non può modificarlo (sola lettura, vedi `access`): la sua esistenza non è un segreto |
 | `NotFound` | 404 | `not_found` (`Not found.`) | oggetto inesistente **o non accessibile** all'utente: non si rivela che esiste |
 | `Conflict` | 409 | `conflict` (`Conflict with the current state.`) | conflitto con lo stato attuale (valore già usato, oggetto in sola lettura, ...) |
 | `InvalidData` | 422 | `invalid_data` (`Invalid data.`) | violazione di una regola non coperta dalla validazione dello schema |
@@ -417,16 +419,56 @@ log_write(AuditLogEntry, request.user, AuditAction.UPDATE, invoice, changes, tea
      `log_write`. Restituisce `{}` se non è cambiato nulla. Un valore uguale a quello salvato ma scritto in
      un altro modo (`Decimal("650")` per un 650.00 salvato) non conta come modifica.
 
-### 4.5 `access` — Oggetti accessibili ✅
+### 4.5 `access` — Permessi: chi legge e chi modifica ✅
 
-- `get_accessible_or_404(source, user, pk, *, for_update=False, include_deleted=False, detail=None)`: restituisce
-  `source.accessible_by(user).get(pk=pk)` oppure solleva `NotFound(detail)`.
+Una sola *policy* decide tutto. Il progetto scrive le sue regole in una sottoclasse di `AccessPolicy` e la indica
+nell'impostazione `DJKIT_ACCESS_POLICY` (percorso puntato); service ed endpoint non scrivono mai filtri d'accesso,
+chiedono solo `scope` / `check` / `get_accessible_or_404`.
+
+- **principal**: chi agisce (oggi un utente; il progetto può passare qualsiasi cosa la sua policy capisca: un
+  cliente da un'app, un ruolo, un job automatico).
+- `Action` (`TextChoices`): `READ` (vedere: elenchi, dettaglio, resoconti), `WRITE` (creare, modificare, eliminare).
+- `AccessLevel` (`TextChoices`): `FULL` (legge e scrive), `READ_ONLY` (solo legge); da mostrare nelle uscite.
+- Regole: una riga fuori da `scope(READ)` non esiste per il principal → `NotFound` (non si rivela che esiste);
+  una riga dentro `scope(READ)` ma fuori da `scope(WRITE)` è in sola lettura → `Forbidden` (403, `read_only`).
+- `class AccessPolicy`:
+  - `scope(principal, queryset, action, include_deleted=False) -> QuerySet`: le righe accessibili per l'azione.
+    Di default `READ` e `WRITE` danno `queryset.accessible_by(principal)` (vedi `db.AccessibleQuerySet`;
+    `include_deleted` solo su un `db.SoftDeleteQuerySet`). Una sottoclasse lo ridefinisce, per esempio per
+    dare in lettura anche righe che non si possono modificare.
+  - `level(principal, obj, source=None) -> AccessLevel | None`: `FULL`, `READ_ONLY` o `None` (non la vede);
+    `source` (modello, manager o QuerySet) dice dove cercare la riga, di default il manager del modello.
+- `get_policy() -> AccessPolicy`: la policy di `DJKIT_ACCESS_POLICY` (istanza in cache), o `AccessPolicy()`.
+- `scope(principal, source, action=Action.READ, include_deleted=False) -> QuerySet`: `get_policy().scope(...)`;
+  `source` è un modello, un manager o un QuerySet (che mantiene i suoi filtri).
+- `level(principal, obj, source=None)`: `get_policy().level(...)`.
+- `check(principal, action, obj, detail=None, read_only_detail=None, source=None)`: `NotFound(detail)` se non la vede,
+  `Forbidden(read_only_detail)` se l'azione è `WRITE` e la riga è in sola lettura.
+- `get_accessible_or_404(source, user, pk, *, action=Action.READ, for_update=False, include_deleted=False,
+  detail=None, read_only_detail=None)`: carica una riga per chiave tra quelle di `scope(user, source, READ)`,
+  oppure solleva `NotFound(detail)`; con `action=WRITE` una riga solo leggibile dà `Forbidden(read_only_detail)`.
   - Con `include_deleted=True` trova anche le righe eliminate logicamente (serve un `db.SoftDeleteQuerySet`):
     si usa per la consultazione; prima di una modifica va seguita da `db.ensure_not_deleted`.
-  - `source` può essere un modello, un manager o un QuerySet; un QuerySet mantiene i suoi filtri.
   - Anche una chiave malformata (per esempio `"abc"` per un intero) dà `NotFound`, mai un errore 500.
   - Con `for_update` usa `select_for_update()`: va chiamata dentro `transaction.atomic()`.
-  - Richiede un QuerySet con il metodo `accessible_by` (vedi `db.AccessibleQuerySet`).
+  - **Prima di una modifica passare sempre `action=Action.WRITE`**: con il default `READ` una policy che dà
+    righe in sola lettura le restituirebbe anche a chi non può modificarle.
+
+```python
+# settings.py
+DJKIT_ACCESS_POLICY = "billing.access.BillingPolicy"
+
+# billing/access.py
+class BillingPolicy(AccessPolicy):
+    def scope(self, principal, queryset, action, include_deleted=False):
+        mine = super().scope(principal, queryset, action, include_deleted)
+        if action == Action.WRITE:
+            return mine
+        return queryset.filter(Q(pk__in=mine.values("pk")) | Q(auditors=principal))  # i revisori leggono
+
+# un service
+invoice = get_accessible_or_404(Invoice, user, pk, action=Action.WRITE, for_update=True)
+```
 
 ### 4.5b `fields` — Campi e vincoli ✅
 

@@ -3,7 +3,7 @@ Domain exceptions and confirmation of destructive operations.
 
 Services raise these exceptions without knowing anything about HTTP;
 djkit.api.register_error_handlers translates them into responses
-(NotFound -> 404, Conflict -> 409, InvalidData -> 422,
+(Forbidden -> 403, NotFound -> 404, Conflict -> 409, InvalidData -> 422,
 ConfirmationRequired -> 428, TooManyRequests -> 429).
 
 Every exception carries a user-facing `detail` message and optional extra
@@ -61,6 +61,15 @@ class NotFound(DomainError):
     """
 
     message_key = "not_found"
+
+
+class Forbidden(DomainError):
+    """
+    The user may see the object but not change it (read-only access, see
+    djkit.access): unlike NotFound, the object's existence is not a secret.
+    """
+
+    message_key = "read_only"
 
 
 class Conflict(DomainError):

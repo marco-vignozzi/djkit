@@ -38,13 +38,14 @@ from ninja import errors as ninja_errors
 from ninja.decorators import decorate_view
 from pydantic import ConfigDict
 
-from .errors import Conflict, ConfirmationRequired, DomainError, InvalidData, NotFound, TooManyRequests
+from .errors import Conflict, ConfirmationRequired, DomainError, Forbidden, InvalidData, NotFound, TooManyRequests
 from .messages import get_message
 
 # Default HTTP status of each domain exception. Subclasses inherit the status
 # of their closest registered ancestor (Ninja looks handlers up along the MRO).
 DEFAULT_STATUS_CODES: dict[type[DomainError], int] = {
     DomainError: 400,
+    Forbidden: 403,
     NotFound: 404,
     Conflict: 409,
     InvalidData: 422,

@@ -6,6 +6,13 @@ All notable changes to djkit. Versions follow semantic versioning
 ## [0.6.0] — unreleased
 
 ### Added
+- `access`: one access policy (`AccessPolicy`, setting `DJKIT_ACCESS_POLICY`)
+  with `Action` (`READ`, `WRITE`), `AccessLevel` (`FULL`, `READ_ONLY`),
+  `get_policy`, `scope`, `level`, `check`; `get_accessible_or_404` takes
+  `action` and `read_only_detail` and goes through the policy (a row
+  readable but not writable -> `Forbidden`).
+- `errors.Forbidden` (403, message key `read_only`), registered in
+  `api.DEFAULT_STATUS_CODES`.
 - `testing.runner`: `--parallel N` works with `VerboseTestRunner`. The
   worker processes install the fast test password hashers too
   (`VerboseParallelTestSuite`, `install_test_password_hashers`) and send
