@@ -58,7 +58,8 @@ djkit/
 ├── updates.py           # modifica parziale di un oggetto
 ├── fields.py            # campi a scelta, importi, vincoli CHECK
 ├── access.py            # permessi: policy unica, scope / check / get_accessible_or_404 (404 o 403)
-├── workspaces.py        # spazi di lavoro separati (multi-tenancy): appartenenze con ruolo, spazio attivo
+├── workspaces.py        # spazi di lavoro separati (multi-tenancy): appartenenze con ruolo, spazio attivo, inviti
+├── retention.py         # conservazione dei dati eliminati: data della cancellazione definitiva e dell'avviso
 ├── db.py                # QuerySet con filtro di accesso, eliminazione logica, subquery, controllo di unicità
 ├── dates.py             # date mensili, anniversari annuali
 ├── deadlines.py         # registro delle scadenze di un progetto (calendario, notifiche)
@@ -80,11 +81,11 @@ djkit/
 Dipendenze interne: `errors` → `messages`; `api` → `errors`, `messages`; `views` → `messages`;
 `access` → `errors`; `auth` → `dev`, `errors`, `messages`; `db` → `errors`, `messages`; `audit` → `fields`, `messages`;
 `updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`); `it` → `dev`, `messages`; `workspaces` → `db`,
-`errors`, `messages`; il comando `export_text_types` →
+`errors`, `messages`; `retention` → nessuno; il comando `export_text_types` →
 `texts`. Tutti gli altri moduli sono indipendenti tra loro.
 
 `djkit` non ha un modulo `models`: i modelli astratti (`audit.AuditEntryBase`, `workspaces.WorkspaceModel`,
-`workspaces.MembershipModel`) si importano dal loro modulo e
+`workspaces.MembershipModel`, `workspaces.InvitationModel`) si importano dal loro modulo e
 vanno usati solo durante il caricamento dei modelli del progetto (cioè dentro il suo `models.py`).
 
 ---
@@ -132,7 +133,7 @@ di `djkit` resta in inglese, ma nessun messaggio inglese arriva all'utente.
 - `DEFAULT_MESSAGES: dict[str, str]`: chiave → testo inglese. Gruppi di chiavi:
   - eccezioni: `domain_error`, `not_found`, `conflict`, `invalid_data`, `confirmation_required`;
   - `db`/`updates`: `unique`, `field_not_editable`, `deleted_read_only`;
-  - `workspaces`: `workspace_not_found`;
+  - `workspaces`: `workspace_not_found`, `invitation_not_found`;
   - `audit`: `audit_masked` (valore di un campo mascherato);
   - `auth`: `login_failed`, `password_too_short` (`{min_length}`), `password_too_similar`, `password_reset_invalid`;
   - errori HTTP: `bad_request`, `unauthorized`, `forbidden`, `csrf_failed`, `method_not_allowed`,
@@ -504,7 +505,12 @@ query a quello. Un ruolo (di default `"ADMIN"`) è l'amministratore dello spazio
   `MembershipModel.one_membership_constraint(name)` (una sola appartenenza viva per utente e spazio);
 - il modello utente ha `current_workspace` (FK nullable allo spazio): l'ultimo scelto, ricordato tra le sessioni.
 
-**Impostazione:** `DJKIT_WORKSPACE_ADMIN_ROLE` (default `"ADMIN"`).
+- facoltativo: un modello concreto dell'invito, sottoclasse di `InvitationModel` (astratto: `email`,
+  `token_digest` unico, `created_at`, `sent_at`, `expires_at`, `accepted_at`, `revoked_at`), con le FK che servono
+  al progetto. Il link inviato porta un token casuale; nel database c'è solo il suo SHA-256, così una copia del
+  database non dà link validi.
+
+**Impostazioni:** `DJKIT_WORKSPACE_ADMIN_ROLE` (default `"ADMIN"`), `DJKIT_INVITATION_VALID_DAYS` (default 7).
 
 **Funzioni:**
 - `memberships(user) -> QuerySet`: appartenenze vive di spazi vivi, dalla più vecchia (spazio caricato).
@@ -517,6 +523,13 @@ query a quello. Un ruolo (di default `"ADMIN"`) è l'amministratore dello spazio
 - `acting_in(user, membership)`: context manager per agire in un'appartenenza data e poi tornare a quella di
   prima (lavori programmati che servono ogni spazio di un utente).
 - `forget_active(user)`: dimentica l'appartenenza memorizzata (dopo averla cambiata).
+- `leave(membership, when=None)`: chiude un'appartenenza (eliminazione logica) e azzera `current_workspace`
+  dell'utente se puntava lì.
+- Inviti: `InvitationModel.OPEN_Q` (né accettato né revocato), `is_open(now)` (anche non scaduto),
+  `renew(now)` (nuovo token e nuova validità, il link di prima smette di valere; non salva; restituisce il token);
+  `new_invitation_token() -> (token, digest)`, `token_digest(token)`,
+  `find_open_invitation(queryset, token, now=None, for_update=False)`: l'invito aperto del token, altrimenti
+  `NotFound` (`invitation_not_found`) — la stessa risposta per token sconosciuto, usato, revocato o scaduto.
 
 ```python
 # models.py del progetto
@@ -535,6 +548,18 @@ def scope(self, principal, queryset, action, include_deleted=False):
     rows = queryset.filter(team=team)
     return rows if is_workspace_admin(principal) else super().scope(principal, rows, action, include_deleted)
 ```
+
+### 4.5c `retention` — Conservazione dei dati eliminati ✅
+
+Quanto restano le righe chiuse o eliminate prima che il progetto le cancelli definitivamente, e quando avvisare
+il proprietario. Il modulo calcola solo le date; cosa cancellare e come lo decide il progetto.
+
+**Impostazioni:** `DJKIT_RETENTION_DAYS` (default 183, positivo), `DJKIT_RETENTION_WARNING_DAYS` (default 30,
+da 0 a `DJKIT_RETENTION_DAYS - 1`); valori fuori dai limiti → `ImproperlyConfigured`.
+
+**Funzioni:** `retention_days()`, `warning_days()`, `purge_at(deleted_at)` (quando viene cancellata una riga
+eliminata in quel momento), `purge_cutoff(now=None)` (le righe eliminate fino a lì sono da cancellare),
+`warning_cutoff(now=None)` (le righe eliminate fino a lì ricevono l'avviso).
 
 ### 4.5b `fields` — Campi e vincoli ✅
 

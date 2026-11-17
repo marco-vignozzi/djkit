@@ -23,9 +23,13 @@ from djkit.workspaces import (
     active_membership,
     active_workspace,
     forget_active,
+    InvitationModel,
+    find_open_invitation,
     is_workspace_admin,
+    leave,
     memberships,
     switch_workspace,
+    token_digest,
 )
 
 GONE = datetime(2026, 3, 1, 9, 0, tzinfo=dt_timezone.utc)
@@ -67,6 +71,15 @@ class WsTestMembership(MembershipModel):
         ]
 
 
+class WsTestInvitation(InvitationModel):
+    """Concrete invitation used only by these tests."""
+
+    workspace = models.ForeignKey(WsTestWorkspace, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        app_label = "djkit"
+
+
 class WorkspaceTests(TestCase):
     """Anna administers 'anna' and is a member of 'bruno'; the active workspace follows her choice."""
 
@@ -75,7 +88,7 @@ class WorkspaceTests(TestCase):
         """Create the three test tables (removed by the class rollback)."""
         super().setUpClass()
         with connection.schema_editor() as editor:
-            for model in (WsTestWorkspace, WsTestUser, WsTestMembership):
+            for model in (WsTestWorkspace, WsTestUser, WsTestMembership, WsTestInvitation):
                 editor.create_model(model)
 
     def setUp(self):
@@ -159,3 +172,34 @@ class WorkspaceTests(TestCase):
     def test_anonymous_has_no_workspace(self):
         """None or an unauthenticated user -> None."""
         self.assertIsNone(active_membership(None))
+
+
+    def test_leave_ends_the_membership_and_the_choice(self):
+        """Anna chose 'bruno' and leaves it -> membership deleted, current_workspace cleared, active 'anna'."""
+        self.anna.current_workspace = self.ws_bruno
+        self.anna.save()
+        leave(self.anna_member, GONE)
+        self.anna_member.refresh_from_db()
+        self.assertEqual((self.anna_member.is_deleted, self.anna_member.deleted_at), (True, GONE))
+        self.assertIsNone(self.fresh(self.anna).current_workspace_id)
+        self.assertEqual(active_workspace(self.anna), self.ws_anna)
+
+    def test_invitation_tokens(self):
+        """renew -> a token whose digest is stored; found while open; after a renew, revoke or expiry -> NotFound."""
+        invitation = WsTestInvitation(workspace=self.ws_anna, email="x@example.com")
+        token = invitation.renew()
+        invitation.save()
+        self.assertEqual(invitation.token_digest, token_digest(token))
+        self.assertNotEqual(invitation.token_digest, token)
+        self.assertEqual(find_open_invitation(WsTestInvitation.objects.all(), token), invitation)
+        new = invitation.renew()
+        invitation.save()
+        with self.assertRaises(NotFound):
+            find_open_invitation(WsTestInvitation.objects.all(), token)
+        self.assertEqual(find_open_invitation(WsTestInvitation.objects.all(), new), invitation)
+        with self.assertRaises(NotFound):
+            find_open_invitation(WsTestInvitation.objects.all(), new, now=invitation.expires_at)
+        invitation.revoked_at = invitation.sent_at
+        invitation.save()
+        with self.assertRaises(NotFound):
+            find_open_invitation(WsTestInvitation.objects.all(), new)

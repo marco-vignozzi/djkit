@@ -16,7 +16,13 @@ All notable changes to djkit. Versions follow semantic versioning
   workspace, one membership per user), the active workspace
   (`memberships`, `active_membership`, `active_workspace`,
   `is_workspace_admin`, `switch_workspace`, `acting_in`, `forget_active`),
-  setting `DJKIT_WORKSPACE_ADMIN_ROLE`, message key `workspace_not_found`.
+  setting `DJKIT_WORKSPACE_ADMIN_ROLE`, message key `workspace_not_found`;
+  `leave`; invitations: abstract `InvitationModel` (token stored only as
+  its SHA-256), `new_invitation_token`, `token_digest`,
+  `find_open_invitation`, setting `DJKIT_INVITATION_VALID_DAYS`, message
+  key `invitation_not_found`.
+- `retention`: dates of the purge of deleted rows and of the warning
+  before it (`DJKIT_RETENTION_DAYS`, `DJKIT_RETENTION_WARNING_DAYS`).
 - `dev.relaxed_validation` (`DJKIT_RELAXED_VALIDATION`, development only):
   `auth.validate_new_password` accepts any password, `it.validate_tax_code`
   1 to 16 characters; the test runner forces it off

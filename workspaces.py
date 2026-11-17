@@ -16,8 +16,14 @@ Contract with the project:
       workspace model): the workspace the user chose last, remembered
       across sessions (switch_workspace sets it).
 
+    - optionally a concrete invitation model, subclass of InvitationModel,
+      with the foreign keys the project needs (workspace, invited person,
+      who invited): the link sent by email carries a random token, the
+      database keeps only its SHA-256 digest.
+
 Settings:
-    DJKIT_WORKSPACE_ADMIN_ROLE  role of the administrator (default "ADMIN").
+    DJKIT_WORKSPACE_ADMIN_ROLE      role of the administrator (default "ADMIN").
+    DJKIT_INVITATION_VALID_DAYS     validity of an invitation link (default 7).
 
 Functions:
     memberships(user)                -> the alive memberships of alive
@@ -30,9 +36,18 @@ Functions:
                                         membership (jobs that serve every
                                         workspace of a user)
     forget_active(user)              -> drop the cached active membership
+    leave(membership, when=None)     -> end a membership (the user left or
+                                        was removed)
+    new_invitation_token()           -> (token for the link, its digest)
+    token_digest(token)              -> the digest stored for a token
+    find_open_invitation(qs, token)  -> the open invitation of a token, or
+                                        NotFound "invitation_not_found"
 """
 
+import hashlib
+import secrets
 from contextlib import contextmanager
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
@@ -244,3 +259,127 @@ def forget_active(user) -> None:
     """
     if hasattr(user, _CACHE):
         delattr(user, _CACHE)
+
+
+def leave(membership, when=None) -> None:
+    """
+    End a membership: the user no longer acts in that workspace. The row
+    stays (soft delete); the user's current_workspace is cleared when it
+    pointed there.
+
+    Args:
+        membership: an alive membership.
+        when: time of the change; None = now.
+    """
+    membership.is_deleted = True
+    membership.deleted_at = when or timezone.now()
+    membership.save(update_fields=["is_deleted", "deleted_at"])
+    user = membership.user
+    if user.current_workspace_id == membership.workspace_id:
+        user.current_workspace = None
+        user.save(update_fields=["current_workspace"])
+    forget_active(user)
+
+
+def invitation_valid_days() -> int:
+    """Validity of an invitation link in days (DJKIT_INVITATION_VALID_DAYS, default 7)."""
+    return getattr(settings, "DJKIT_INVITATION_VALID_DAYS", 7)
+
+
+class InvitationModel(models.Model):
+    """
+    Abstract invitation to join a workspace, sent by email with a link.
+
+    An invitation is *open* until it is accepted, revoked or expired. The
+    token of the link is never stored: only its digest (token_digest), so
+    a copy of the database does not give working links.
+
+    Fields:
+        email        -> address the link was sent to (normalized).
+        token_digest -> SHA-256 of the token of the last link sent (unique).
+        created_at   -> when it was created.
+        sent_at      -> when the last link was sent (a new link replaces
+                        the previous one).
+        expires_at   -> end of validity of the last link.
+        accepted_at  -> when it was accepted (then it is closed).
+        revoked_at   -> when it was revoked or replaced (then it is closed).
+    """
+
+    email = models.EmailField("email")
+    token_digest = models.CharField("token digest", max_length=64, unique=True)
+    created_at = models.DateTimeField("created at", default=timezone.now)
+    sent_at = models.DateTimeField("sent at", default=timezone.now)
+    expires_at = models.DateTimeField("expires at")
+    accepted_at = models.DateTimeField("accepted at", null=True, blank=True)
+    revoked_at = models.DateTimeField("revoked at", null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+    OPEN_Q = Q(accepted_at__isnull=True, revoked_at__isnull=True)
+
+    def is_open(self, now=None) -> bool:
+        """Not accepted, not revoked and not expired at `now` (None = now)."""
+        now = now or timezone.now()
+        return self.accepted_at is None and self.revoked_at is None and self.expires_at > now
+
+    def renew(self, now=None) -> str:
+        """
+        Give the invitation a new link (the previous one stops working)
+        and a new validity. Does not save.
+
+        Args:
+            now: time of sending; None = now.
+
+        Returns:
+            The token to put in the link.
+        """
+        now = now or timezone.now()
+        token, digest = new_invitation_token()
+        self.token_digest = digest
+        self.sent_at = now
+        self.expires_at = now + timedelta(days=invitation_valid_days())
+        return token
+
+
+def new_invitation_token() -> tuple[str, str]:
+    """
+    A new random token for an invitation link.
+
+    Returns:
+        (token, digest): the token goes in the link, the digest in the
+        database.
+    """
+    token = secrets.token_urlsafe(32)
+    return token, token_digest(token)
+
+
+def token_digest(token: str) -> str:
+    """The SHA-256 hex digest of a token."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def find_open_invitation(queryset, token: str, now=None, for_update: bool = False):
+    """
+    The open invitation of a token.
+
+    Args:
+        queryset: the invitations (QuerySet of an InvitationModel subclass).
+        token: the token of the link.
+        now: reference time; None = now.
+        for_update: lock the row.
+
+    Returns:
+        The invitation.
+
+    Raises:
+        NotFound: no invitation with that token, or not open any more
+            (message "invitation_not_found": the same answer in every case,
+            so a token cannot be probed).
+    """
+    now = now or timezone.now()
+    rows = queryset.select_for_update() if for_update else queryset
+    invitation = rows.filter(token_digest=token_digest(token or "")).first()
+    if invitation is None or not invitation.is_open(now):
+        raise NotFound(get_message("invitation_not_found"))
+    return invitation

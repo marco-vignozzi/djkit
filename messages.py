@@ -25,6 +25,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "domain_error": "Request failed.",
     "not_found": "Not found.",
     "workspace_not_found": "Workspace not found, or you no longer belong to it.",
+    "invitation_not_found": "Invitation not found, already used or expired.",
     "read_only": "You can only consult this item: you cannot change it.",
     "conflict": "Conflict with the current state.",
     "invalid_data": "Invalid data.",
