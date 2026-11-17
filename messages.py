@@ -50,6 +50,9 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "method_not_allowed": "Method not allowed.",
     "too_many_requests": "Too many requests: try again later.",
     "server_error": "Internal server error.",
+    # pagination (djkit.pagination)
+    "page_size_not_allowed": "Rows per page must be one of: {sizes}.",
+    "page_out_of_range": "This page does not exist: the pages are {pages}.",
     # schema validation (Pydantic error types, see api.validation_message)
     "missing": "This field is required.",
     "invalid_value": "Invalid value.",

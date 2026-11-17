@@ -12,10 +12,12 @@ from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.urls import path, re_path
 from ninja import Field, NinjaAPI, Schema
+from ninja.pagination import paginate
 from ninja.security import django_auth
 
 from djkit.api import ConfirmationIn, InputSchema, csrf_protected, register_error_handlers, sets_csrf_cookie
 from djkit import views
+from djkit.pagination import PageNumber
 from djkit.auth import login_with_password
 from djkit.errors import Conflict, DomainError, InvalidData, NotFound, TooManyRequests, require_confirmation
 
@@ -129,6 +131,13 @@ def person(request, payload: PersonIn):
 def http404(request):
     """Public: Django's Http404 raised inside an operation."""
     raise Http404("Technical message never shown.")
+
+
+@api.get("/public/numbers", auth=None, response=list[int])
+@paginate(PageNumber)
+def numbers(request):
+    """The numbers 1..60, paged by djkit.pagination.PageNumber."""
+    return list(range(1, 61))
 
 
 # Catch-all after the API: unknown paths under /api/ answer the JSON 404.

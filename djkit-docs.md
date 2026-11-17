@@ -70,6 +70,7 @@ djkit/
 ├── mail.py              # invio email (testi da template) con modalità demo e domini bloccati
 ├── clients.py           # indirizzo del client (anche dietro proxy) e sua chiave anonima
 ├── numbers.py           # divisione di un totale in parti uguali o per pesi, trasferimenti minimi
+├── pagination.py        # liste a pagine per numero di pagina (Django Ninja): ?page=&size=
 ├── texts.py             # catalogo dei testi per chiave, servito al frontend con ETag, chiavi esportate in TypeScript
 ├── management/commands/export_text_types.py   # comando che scrive le chiavi del catalogo in un file .ts
 ├── testing/
@@ -876,6 +877,36 @@ CATALOG.text("ui.cart.items", count=3)    # "3 articoli"
 ```python
 minimal_transfers({"anna": Decimal("-700"), "bruno": Decimal("700")})
 # -> [("anna", "bruno", Decimal("700"))]
+```
+
+### 4.9d `pagination` — Liste a pagine ✅
+
+Liste lunghe a pagine per numero di pagina, come le mostra un'interfaccia
+("pagina 3, 25 righe per pagina"), con un insieme fisso di dimensioni ed
+errori chiari per quello che può essere solo un errore del chiamante.
+
+| Nome | Firma | Descrizione | Stato |
+|---|---|---|---|
+| `PageNumber` | paginatore di Django Ninja (`@paginate(PageNumber)`) | query `?page=` (da 1, predefinito 1) e `?size=` (una di `DJKIT_PAGE_SIZES`, predefinita `DJKIT_PAGE_SIZE`); risposta `{items, count, page, size, pages}` | ✅ |
+| `page_of` | `page_of(rows, page=1, size=None) -> Page` | la stessa pagina per un service o un comando, senza Ninja; `rows` è un QuerySet **ordinato** o una lista | ✅ |
+| `Page` | dataclass `items, count, page, size, pages` | una pagina (`pages` almeno 1) | ✅ |
+| `page_sizes()`, `default_page_size()` | — | le impostazioni lette a ogni chiamata (`override_settings` funziona); `DJKIT_PAGE_SIZE` fuori da `DJKIT_PAGE_SIZES` → `ValueError` | ✅ |
+
+Errori: dimensione non ammessa → `InvalidData` su `size` (chiave
+`page_size_not_allowed`, con `{sizes}`); pagina sotto 1 o dopo l'ultima
+(con almeno una riga) → `InvalidData` su `page` (`page_out_of_range`, con
+`{pages}`); la pagina 1 di una lista vuota va bene; un QuerySet non
+ordinato → `ValueError` (le pagine si sovrapporrebbero o salterebbero
+righe).
+
+Impostazioni: `DJKIT_PAGE_SIZES` (predefinito `(10, 25, 50, 100)`),
+`DJKIT_PAGE_SIZE` (predefinito 25).
+
+```python
+@router.get("", response=list[ItemOut])
+@paginate(PageNumber)
+def list_items(request):
+    return Item.objects.order_by("-created", "pk")
 ```
 
 ### 4.10 `testing.runner` — Output leggibile dei test ✅

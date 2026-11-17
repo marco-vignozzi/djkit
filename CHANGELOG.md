@@ -5,6 +5,13 @@ All notable changes to djkit. Versions follow semantic versioning
 
 ## [0.6.0] — unreleased
 
+### Added (pagination)
+- `pagination`: `PageNumber` (Django Ninja paginator, `?page=&size=`,
+  answer `{items, count, page, size, pages}`), `page_of`, `Page`,
+  `page_sizes`, `default_page_size`; settings `DJKIT_PAGE_SIZES`,
+  `DJKIT_PAGE_SIZE`; message keys `page_size_not_allowed`,
+  `page_out_of_range`; an unordered QuerySet raises `ValueError`.
+
 ### Changed
 - `api.validation_message`: an empty text where one character is required
   (`string_too_short`, `min_length` 1) gets the `missing` message instead
