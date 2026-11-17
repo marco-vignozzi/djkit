@@ -17,6 +17,8 @@ from djkit.errors import Forbidden, NotFound
 from djkit.messages import get_message
 
 
+# The framework's default rules, whatever policy the project configures.
+@override_settings(DJKIT_ACCESS_POLICY=None)
 class GetAccessibleOr404Tests(TestCase):
     """Missing and not-accessible objects give the same NotFound."""
 
@@ -113,6 +115,8 @@ class AccessPolicyTests(TestCase):
         self.assertEqual(caught.exception.detail, "Read only.")
 
 
+# The framework's default rules, whatever policy the project configures.
+@override_settings(DJKIT_ACCESS_POLICY=None)
 class DefaultPolicyTests(TestCase):
     """Without DJKIT_ACCESS_POLICY read and write both follow accessible_by."""
 

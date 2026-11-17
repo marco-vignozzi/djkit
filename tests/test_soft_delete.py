@@ -41,6 +41,8 @@ class SoftDeleteTestItem(SoftDeleteModel):
         constraints = [SoftDeleteModel.deleted_state_constraint("softdeletetestitem_deleted_state")]
 
 
+# The framework's default rules, whatever policy the project configures.
+@override_settings(DJKIT_ACCESS_POLICY=None)
 class SoftDeleteQuerySetTests(TestCase):
     """Deleted rows stay in the table, are hidden by accessible_by and can still be read on request."""
 

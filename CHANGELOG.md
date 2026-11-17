@@ -11,6 +11,12 @@ All notable changes to djkit. Versions follow semantic versioning
   of "Enter at least 1 characters.".
 
 ### Added
+- `workspaces`: separate workspaces in one database (multi-tenancy):
+  abstract `WorkspaceModel` and `MembershipModel` (role, one admin per
+  workspace, one membership per user), the active workspace
+  (`memberships`, `active_membership`, `active_workspace`,
+  `is_workspace_admin`, `switch_workspace`, `acting_in`, `forget_active`),
+  setting `DJKIT_WORKSPACE_ADMIN_ROLE`, message key `workspace_not_found`.
 - `dev.relaxed_validation` (`DJKIT_RELAXED_VALIDATION`, development only):
   `auth.validate_new_password` accepts any password, `it.validate_tax_code`
   1 to 16 characters; the test runner forces it off

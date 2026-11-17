@@ -58,6 +58,7 @@ djkit/
 ├── updates.py           # modifica parziale di un oggetto
 ├── fields.py            # campi a scelta, importi, vincoli CHECK
 ├── access.py            # permessi: policy unica, scope / check / get_accessible_or_404 (404 o 403)
+├── workspaces.py        # spazi di lavoro separati (multi-tenancy): appartenenze con ruolo, spazio attivo
 ├── db.py                # QuerySet con filtro di accesso, eliminazione logica, subquery, controllo di unicità
 ├── dates.py             # date mensili, anniversari annuali
 ├── deadlines.py         # registro delle scadenze di un progetto (calendario, notifiche)
@@ -78,10 +79,12 @@ djkit/
 
 Dipendenze interne: `errors` → `messages`; `api` → `errors`, `messages`; `views` → `messages`;
 `access` → `errors`; `auth` → `dev`, `errors`, `messages`; `db` → `errors`, `messages`; `audit` → `fields`, `messages`;
-`updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`); `it` → `dev`, `messages`; il comando `export_text_types` →
+`updates` → `errors`, `messages`, `audit` (`snapshot`, `diff`); `it` → `dev`, `messages`; `workspaces` → `db`,
+`errors`, `messages`; il comando `export_text_types` →
 `texts`. Tutti gli altri moduli sono indipendenti tra loro.
 
-`djkit` non ha un modulo `models`: i modelli astratti (`audit.AuditEntryBase`) si importano dal loro modulo e
+`djkit` non ha un modulo `models`: i modelli astratti (`audit.AuditEntryBase`, `workspaces.WorkspaceModel`,
+`workspaces.MembershipModel`) si importano dal loro modulo e
 vanno usati solo durante il caricamento dei modelli del progetto (cioè dentro il suo `models.py`).
 
 ---
@@ -129,6 +132,7 @@ di `djkit` resta in inglese, ma nessun messaggio inglese arriva all'utente.
 - `DEFAULT_MESSAGES: dict[str, str]`: chiave → testo inglese. Gruppi di chiavi:
   - eccezioni: `domain_error`, `not_found`, `conflict`, `invalid_data`, `confirmation_required`;
   - `db`/`updates`: `unique`, `field_not_editable`, `deleted_read_only`;
+  - `workspaces`: `workspace_not_found`;
   - `audit`: `audit_masked` (valore di un campo mascherato);
   - `auth`: `login_failed`, `password_too_short` (`{min_length}`), `password_too_similar`, `password_reset_invalid`;
   - errori HTTP: `bad_request`, `unauthorized`, `forbidden`, `csrf_failed`, `method_not_allowed`,
@@ -483,6 +487,53 @@ class BillingPolicy(AccessPolicy):
 
 # un service
 invoice = get_accessible_or_404(Invoice, user, pk, action=Action.WRITE, for_update=True)
+```
+
+### 4.5a `workspaces` — Spazi di lavoro separati ✅
+
+Più insiemi di dati separati nello stesso database (multi-tenancy a righe): ogni utente appartiene a uno o più
+*spazi di lavoro* con un ruolo; uno è quello **attivo**, e le regole di accesso del progetto (§4.5) limitano ogni
+query a quello. Un ruolo (di default `"ADMIN"`) è l'amministratore dello spazio: al massimo uno per spazio.
+
+**Contratto con il progetto:**
+- un modello concreto dello spazio, sottoclasse di `WorkspaceModel` (astratto, `SoftDeleteModel` +
+  `created_at`): uno spazio chiuso resta come riga eliminata logicamente finché il progetto non lo cancella;
+- un modello concreto dell'appartenenza, sottoclasse di `MembershipModel` (astratto, `SoftDeleteModel` + `role`,
+  `joined_at`), con le FK `user` e `workspace` entrambe con `related_name="memberships"`; nel `Meta` può usare
+  `MembershipModel.one_admin_constraint(name)` (un solo amministratore vivo per spazio) e
+  `MembershipModel.one_membership_constraint(name)` (una sola appartenenza viva per utente e spazio);
+- il modello utente ha `current_workspace` (FK nullable allo spazio): l'ultimo scelto, ricordato tra le sessioni.
+
+**Impostazione:** `DJKIT_WORKSPACE_ADMIN_ROLE` (default `"ADMIN"`).
+
+**Funzioni:**
+- `memberships(user) -> QuerySet`: appartenenze vive di spazi vivi, dalla più vecchia (spazio caricato).
+- `active_membership(user)`: quella di `current_workspace` se dà ancora accesso, altrimenti quella da
+  amministratore, altrimenti la più vecchia; `None` senza spazi o per un utente anonimo. Memorizzata
+  sull'istanza dell'utente (vive una richiesta).
+- `active_workspace(user)`, `is_workspace_admin(user) -> bool`.
+- `switch_workspace(user, workspace_id)`: rende attivo un altro spazio dell'utente e salva `current_workspace`;
+  `NotFound` (messaggio `workspace_not_found`) se l'utente non ne fa parte.
+- `acting_in(user, membership)`: context manager per agire in un'appartenenza data e poi tornare a quella di
+  prima (lavori programmati che servono ogni spazio di un utente).
+- `forget_active(user)`: dimentica l'appartenenza memorizzata (dopo averla cambiata).
+
+```python
+# models.py del progetto
+class Team(WorkspaceModel): ...
+class Membership(MembershipModel):
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="memberships")
+    workspace = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="memberships")
+    class Meta:
+        constraints = [MembershipModel.one_admin_constraint("membership_one_admin")]
+
+# policy del progetto: tutto dentro lo spazio attivo, l'amministratore vede tutto
+def scope(self, principal, queryset, action, include_deleted=False):
+    team = active_workspace(principal)
+    if team is None:
+        return queryset.none()
+    rows = queryset.filter(team=team)
+    return rows if is_workspace_admin(principal) else super().scope(principal, rows, action, include_deleted)
 ```
 
 ### 4.5b `fields` — Campi e vincoli ✅

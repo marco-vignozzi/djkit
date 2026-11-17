@@ -24,6 +24,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     # errors: default detail of each domain exception
     "domain_error": "Request failed.",
     "not_found": "Not found.",
+    "workspace_not_found": "Workspace not found, or you no longer belong to it.",
     "read_only": "You can only consult this item: you cannot change it.",
     "conflict": "Conflict with the current state.",
     "invalid_data": "Invalid data.",
