@@ -215,6 +215,14 @@ class ValidationHelperTests(SimpleTestCase):
         self.assertEqual(validation_message({"type": "something_new"}), "Invalid value.")
 
     @override_settings(DJKIT_MESSAGES={})
+    def test_empty_required_text_is_a_missing_field(self):
+        """string_too_short min_length 1 -> 'This field is required.' (missing); min_length 3 -> 'Enter at least 3 characters.'."""
+        self.assertEqual(validation_message({"type": "string_too_short", "ctx": {"min_length": 1}}), "This field is required.")
+        self.assertEqual(
+            validation_message({"type": "string_too_short", "ctx": {"min_length": 3}}), "Enter at least 3 characters."
+        )
+
+    @override_settings(DJKIT_MESSAGES={})
     def test_list_too_short_or_long_counts_items_not_characters(self):
         """too_short min_length 1 -> 'Enter at least 1 items.'; too_long max_length 3 -> 'Enter at most 3 items.'."""
         self.assertEqual(

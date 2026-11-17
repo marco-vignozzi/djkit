@@ -212,7 +212,9 @@ require_confirmation(payload.confirmations, 2 if has_money_rows else 1, impact)
     punto `"items.0.amount"`, nessun campo → `NON_FIELD_ERRORS = "__all__"`).
   - `validation_message(error) -> str`: messaggio per tipo di errore Pydantic (`VALIDATION_MESSAGE_KEYS`, con i
     segnaposto presi da `ctx`, per esempio `{min_length}`); per `value_error` (un validatore personalizzato che
-    solleva `ValueError`) il messaggio del validatore stesso; tipi sconosciuti → `invalid_value`.
+    solleva `ValueError`) il messaggio del validatore stesso; un testo vuoto dove serve almeno un carattere
+    (`string_too_short` con `min_length` 1) → `missing` ("Campo obbligatorio.", non "almeno 1 caratteri"); tipi
+    sconosciuti → `invalid_value`.
 - `ErrorOut`: schema `{detail: str, errors?: {campo: [str]}, impact?: dict, required?: int, given?: int}`.
 - `InputSchema`: base degli schemi dei **corpi delle richieste** (`model_config = ConfigDict(extra="forbid")`). Un
   campo che lo schema non dichiara risponde 422 su quel campo con la chiave `unknown_field` (anche dentro un elenco:

@@ -294,12 +294,16 @@ def validation_message(error: dict) -> str:
     Returns:
         The message of VALIDATION_MESSAGE_KEYS for the error type, with the
         placeholders filled from "ctx" (e.g. {min_length}); for "value_error"
-        the custom validator's own message; "invalid_value" otherwise.
+        the custom validator's own message; "invalid_value" otherwise. An
+        empty text where at least one character is needed gets the
+        "missing" message ("required field"), not "at least 1 characters".
     """
     error_type = error.get("type", "")
     ctx = error.get("ctx") or {}
     if error_type == "value_error" and ctx.get("error") is not None:
         return str(ctx["error"])
+    if error_type == "string_too_short" and ctx.get("min_length") == 1:
+        return get_message("missing")
     return get_message(VALIDATION_MESSAGE_KEYS.get(error_type, "invalid_value"), **ctx)
 
 

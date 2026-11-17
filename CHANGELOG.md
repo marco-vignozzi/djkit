@@ -5,6 +5,11 @@ All notable changes to djkit. Versions follow semantic versioning
 
 ## [0.6.0] — unreleased
 
+### Changed
+- `api.validation_message`: an empty text where one character is required
+  (`string_too_short`, `min_length` 1) gets the `missing` message instead
+  of "Enter at least 1 characters.".
+
 ### Added
 - `dev.relaxed_validation` (`DJKIT_RELAXED_VALIDATION`, development only):
   `auth.validate_new_password` accepts any password, `it.validate_tax_code`
