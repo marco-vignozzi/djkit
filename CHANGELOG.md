@@ -5,6 +5,11 @@ All notable changes to djkit. Versions follow semantic versioning
 
 ## [0.6.0] — unreleased
 
+### Added (strict query)
+- `api.forbid_unknown_query_params` / `StrictQueryModel`: a query parameter
+  an endpoint does not declare -> 422 on that name (`unknown_query_param`);
+  enabled by `DJKIT_FORBID_UNKNOWN_QUERY_PARAMS` (`DjkitConfig.ready`).
+
 ### Added (pagination)
 - `pagination`: `PageNumber` (Django Ninja paginator, `?page=&size=`,
   answer `{items, count, page, size, pages}`), `page_of`, `Page`,

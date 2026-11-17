@@ -11,3 +11,16 @@ class DjkitConfig(AppConfig):
 
     name = "djkit"
     verbose_name = "djkit"
+
+    def ready(self) -> None:
+        """
+        With DJKIT_FORBID_UNKNOWN_QUERY_PARAMS = True, reject the query
+        parameters an endpoint does not declare (djkit.api), before any
+        API module declares its endpoints.
+        """
+        from django.conf import settings
+
+        if getattr(settings, "DJKIT_FORBID_UNKNOWN_QUERY_PARAMS", False):
+            from .api import forbid_unknown_query_params
+
+            forbid_unknown_query_params()

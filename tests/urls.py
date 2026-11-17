@@ -11,7 +11,7 @@ import datetime
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.urls import path, re_path
-from ninja import Field, NinjaAPI, Schema
+from ninja import Field, NinjaAPI, Query, Schema
 from ninja.pagination import paginate
 from ninja.security import django_auth
 
@@ -138,6 +138,12 @@ def http404(request):
 def numbers(request):
     """The numbers 1..60, paged by djkit.pagination.PageNumber."""
     return list(range(1, 61))
+
+
+@api.get("/public/filtered", auth=None)
+def filtered(request, color: str = "", tag: Query[list[str]] = None):
+    """Echo of two declared query parameters (one repeatable)."""
+    return {"color": color, "tag": tag or []}
 
 
 # Catch-all after the API: unknown paths under /api/ answer the JSON 404.

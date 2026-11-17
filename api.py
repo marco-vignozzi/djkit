@@ -6,6 +6,14 @@ Django Ninja integration.
       declare is rejected (422 "unknown_field") instead of being silently
       ignored, so a client that sends a wrong or misspelled field finds out.
     - ConfirmationIn: body of destructive requests (number of confirmations).
+    - forbid_unknown_query_params(): a query parameter an endpoint does not
+      declare is rejected (422 "unknown_query_param" on that parameter)
+      instead of being ignored, so a misspelled filter never returns the
+      whole list. Enabled by DJKIT_FORBID_UNKNOWN_QUERY_PARAMS (djkit's
+      AppConfig.ready, before the API modules are imported). It applies
+      to endpoints with at least one query parameter (pagination ones
+      included); an endpoint without any has nothing a stray parameter
+      could change.
     - register_error_handlers(api): maps the djkit.errors exceptions, Django's
       ValidationError and the errors produced by Django Ninja itself (401,
       403 CSRF, 404, schema validation 422, 429) to ErrorOut responses whose
@@ -36,6 +44,8 @@ from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from ninja import Field, NinjaAPI, Schema
 from ninja import errors as ninja_errors
 from ninja.decorators import decorate_view
+from ninja.params.models import Query as QueryParam
+from ninja.params.models import QueryModel
 from pydantic import ConfigDict
 
 from .errors import Conflict, ConfirmationRequired, DomainError, Forbidden, InvalidData, NotFound, TooManyRequests
@@ -160,6 +170,39 @@ class ErrorOut(Schema):
     required: int | None = None
     given: int | None = None
     retry_at: str | None = None
+
+
+class StrictQueryModel(QueryModel):
+    """
+    The query parameters of one endpoint (Django Ninja builds one model per
+    endpoint, with every query parameter in __ninja_flatten_map__): a name
+    it does not declare is a 422 on that name.
+    """
+
+    @classmethod
+    def get_request_data(cls, request, api, path_params):
+        """
+        The query data, after refusing the undeclared names.
+
+        Raises:
+            InvalidData: errors {name: [unknown_query_param]} for every
+                name of request.GET the endpoint does not declare.
+        """
+        allowed = set(getattr(cls, "__ninja_flatten_map__", {}))
+        unknown = sorted(set(request.GET) - allowed)
+        if unknown:
+            raise InvalidData(errors={name: [get_message("unknown_query_param")] for name in unknown})
+        return super().get_request_data(request, api, path_params)
+
+
+def forbid_unknown_query_params() -> None:
+    """
+    Make Django Ninja build every query model on StrictQueryModel. Call it
+    before the endpoints are declared (djkit's AppConfig.ready does it
+    with DJKIT_FORBID_UNKNOWN_QUERY_PARAMS = True): models built earlier
+    keep the default behaviour.
+    """
+    QueryParam._model = StrictQueryModel
 
 
 class InputSchema(Schema):

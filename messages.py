@@ -77,6 +77,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "choice": "Value not allowed.",
     "list_type": "Enter a list of values.",
     "unknown_field": "This field is not accepted.",
+    "unknown_query_param": "This parameter is not accepted.",
     "object_type": "Enter an object.",
 }
 

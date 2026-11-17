@@ -263,3 +263,27 @@ class MakeUserTests(ApiTestCase):
         """USERNAME_FIELD override "bruno@rentals-test.it" -> stored as given (whatever the user model)."""
         user = make_user(**{get_user_model().USERNAME_FIELD: "bruno@rentals-test.it"})
         self.assertEqual(user.get_username(), "bruno@rentals-test.it")
+
+
+@override_settings(ROOT_URLCONF="djkit.tests.urls", DJKIT_MESSAGES={})
+class UnknownQueryParamTests(ApiTestCase):
+    """forbid_unknown_query_params (enabled by the test settings): undeclared query names -> 422 on each."""
+
+    def test_declared_parameters_pass(self):
+        """?color=red&tag=a&tag=b -> 200, echoed."""
+        response = self.client.get("/api/public/filtered?color=red&tag=a&tag=b")
+        self.assertStatus(response, 200)
+        self.assertEqual(response.json(), {"color": "red", "tag": ["a", "b"]})
+
+    def test_unknown_parameters_are_422_each_on_its_name(self):
+        """?colour=red&x=1 -> 422 with errors on "colour" and "x"."""
+        response = self.client.get("/api/public/filtered?colour=red&x=1")
+        self.assertStatus(response, 422)
+        self.assertEqual(response.json()["errors"], {"colour": ["This parameter is not accepted."], "x": ["This parameter is not accepted."]})
+
+    def test_pagination_parameters_are_declared(self):
+        """A paged endpoint: ?page=&size= accepted, ?limit= (Ninja's) refused."""
+        self.assertStatus(self.client.get("/api/public/numbers?page=1&size=10"), 200)
+        response = self.client.get("/api/public/numbers?limit=5")
+        self.assertStatus(response, 422)
+        self.assertIn("limit", response.json()["errors"])

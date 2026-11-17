@@ -144,7 +144,7 @@ di `djkit` resta in inglese, ma nessun messaggio inglese arriva all'utente.
     `list_too_long` (`{max_length}`), `number_type`, `boolean_type`, `date_type`,
     `datetime_type`, `greater_than` (`{gt}`), `greater_than_equal` (`{ge}`), `less_than` (`{lt}`),
     `less_than_equal` (`{le}`), `max_digits` (`{max_digits}`), `decimal_places` (`{decimal_places}`), `choice`,
-    `list_type`, `object_type`, `unknown_field` (campo non dichiarato dallo schema, vedi `InputSchema`);
+    `list_type`, `object_type`, `unknown_field` (campo non dichiarato dallo schema, vedi `InputSchema`), `unknown_query_param` (parametro di query non dichiarato, vedi `forbid_unknown_query_params`);
   - `it`: `tax_code_invalid` (`{length}`).
 - `get_message(key: str, **params) -> str`: testo del progetto (`DJKIT_MESSAGES`) o quello inglese, con i
   segnaposto `{nome}` riempiti (`str.format`); se manca il valore di un segnaposto restituisce il testo così com'è.
@@ -226,6 +226,13 @@ require_confirmation(payload.confirmations, 2 if has_money_rows else 1, impact)
   campo che lo schema non dichiara risponde 422 su quel campo con la chiave `unknown_field` (anche dentro un elenco:
   `"0.role"`), invece di essere scartato in silenzio: un client che sbaglia il nome di un campo, o manda un campo che
   quell'endpoint non modifica, se ne accorge subito. Gli schemi delle risposte restano `ninja.Schema`.
+- `forbid_unknown_query_params()` e `StrictQueryModel`: un **parametro di query** che l'endpoint non dichiara
+  risponde 422 su quel nome con la chiave `unknown_query_param`, invece di essere ignorato (un filtro scritto male
+  non restituisce l'elenco intero). Si attiva con `DJKIT_FORBID_UNKNOWN_QUERY_PARAMS = True`: l'`AppConfig.ready` di
+  djkit lo chiama prima che i moduli dell'API dichiarino gli endpoint (Django Ninja costruisce un modello di query
+  per endpoint, con tutti i nomi ammessi, paginazione compresa). Vale per gli endpoint con almeno un parametro di
+  query; uno senza non ha niente che un parametro in più possa cambiare. Un parametro lista va dichiarato
+  `Query[list[str]]`, altrimenti Django Ninja lo legge dal corpo. ✅
 - `ConfirmationIn` (un `InputSchema`): schema `{confirmations: int = 0}` (≥ 0), il numero di conferme date dal client.
   `{"confirmation": 2}` (errore di battitura) → 422, non un 428 con 0 conferme.
 - `csrf_protected`: decoratore di operazione (`decorate_view(csrf_protect)`) che impone il controllo CSRF di
