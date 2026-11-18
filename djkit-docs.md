@@ -109,6 +109,7 @@ TEST_RUNNER = "djkit.testing.runner.VerboseTestRunner"   # facoltativo
 | `DJKIT_AUDIT_EXCLUDED_FIELDS` | `{"password"}` | `audit`, `updates` | campi mai scritti nel registro (né nelle `snapshot`, né nei `diff`); il valore **sostituisce** il default | ✅ |
 | `DJKIT_AUDIT_MASKED_FIELDS` | `frozenset()` | `audit` | campi scritti nel registro con il valore **mascherato** (testo della chiave `audit_masked`; un valore vuoto resta vuoto): si vede che il campo è stato impostato o cambiato, mai il valore. Vale per i campi con quel nome in **ogni** modello (es. dati personali: `{"email", "phone"}`) | ✅ |
 | `DJKIT_MESSAGES` | `{}` | `messages` (e quindi `errors`, `api`, `views`, `auth`, `db`, `updates`) | testi dei messaggi per l'utente, `{chiave: testo}`; le chiavi assenti restano col testo inglese di `DEFAULT_MESSAGES`. Un progetto in un'altra lingua le fornisce **tutte** (vedi §4.0) | ✅ |
+| `DJKIT_SPA_ROOT_FILES` | nessuno (obbligatorio per `spa_root_file`) | `views` | `{nome: content type}` dei file della build serviti dalla radice del sito | ✅ |
 | `DJKIT_SPA_INDEX` | nessuno (obbligatorio per `spa_index`) | `views` | percorso dell'`index.html` della build della SPA | ✅ |
 | `DJKIT_RELAXED_VALIDATION` | `False` | `dev` (e quindi `auth`, `it`) | solo sviluppo: password senza regole, codice fiscale da 1 a 16 caratteri; con `DEBUG` spento → `ImproperlyConfigured`; spento durante i test | ✅ |
 | `DJKIT_MAIL_DEMO_MODE` | `False` | `mail` | se vero `send_email` non invia e registra nel log destinatari e oggetto (istanze dimostrative) | ✅ |
@@ -268,6 +269,7 @@ controllo CSRF fallito di `csrf_protect` (per esempio `api.csrf_protected`) e, c
   `server_error` → 500 `server_error` (per `handler400`/`handler403`/`handler404`/`handler500`).
 - `error_response(key, status) -> JsonResponse`: la risposta comune.
 - `spa_index(request) -> HttpResponse` ✅: rotta finale che serve l'`index.html` della build di una single-page application (percorso in `DJKIT_SPA_INDEX`), così le rotte del client funzionano anche ricaricando la pagina. Il file è letto a ogni richiesta (una nuova build si vede senza riavviare) con `Cache-Control: no-cache`. File assente → 404 `not_found` e una riga di log `ERROR`; setting assente → `ImproperlyConfigured`. Uso: `re_path(r"^", spa_index)` come ultima rotta.
+- `spa_root_file(request, name) -> HttpResponse` ✅: serve dalla radice del sito (es. `/sw.js`) i file della build elencati in `DJKIT_SPA_ROOT_FILES`, presi dalla cartella di `DJKIT_SPA_INDEX`, con `Cache-Control: no-cache`. Serve a un service worker, che controlla solo i percorsi sotto il proprio URL, o ad altri file attesi alla radice. Un nome non elencato o un file assente → 404 `not_found` (file assente anche con log `ERROR`); setting assenti → `ImproperlyConfigured`. Uso: `re_path(r"^(?P<name>sw\.js)$", spa_root_file)` prima della rotta finale.
 
 ```python
 # settings.py

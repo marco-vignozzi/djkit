@@ -111,3 +111,47 @@ class SpaIndexTests(SimpleTestCase):
                 del settings.DJKIT_SPA_INDEX
             with self.assertRaises(ImproperlyConfigured):
                 views.spa_index(RequestFactory().get("/"))
+
+
+@override_settings(DJKIT_MESSAGES=TEST_MESSAGES)
+class SpaRootFileTests(SimpleTestCase):
+    """spa_root_file serves only the listed build files from the site root."""
+
+    FILES = {"sw.js": "text/javascript; charset=utf-8"}
+
+    def test_serves_a_listed_file_without_cache(self):
+        """sw.js listed and built -> 200 with its content type, bytes and no-cache."""
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "sw.js").write_text("self.x=1", encoding="utf-8")
+            with override_settings(DJKIT_SPA_INDEX=Path(folder) / "index.html", DJKIT_SPA_ROOT_FILES=self.FILES):
+                response = views.spa_root_file(RequestFactory().get("/sw.js"), "sw.js")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/javascript; charset=utf-8")
+        self.assertEqual(response["Cache-Control"], "no-cache")
+        self.assertEqual(response.content, b"self.x=1")
+
+    def test_unlisted_name_answers_404_even_if_the_file_exists(self):
+        """index.html exists but is not listed -> 404 not_found."""
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "index.html").write_text("x", encoding="utf-8")
+            with override_settings(DJKIT_SPA_INDEX=Path(folder) / "index.html", DJKIT_SPA_ROOT_FILES=self.FILES):
+                response = views.spa_root_file(RequestFactory().get("/index.html"), "index.html")
+        self.assertEqual(response.status_code, 404)
+        self.assertJSONEqual(response.content, {"detail": "Non trovato."})
+
+    def test_missing_file_answers_404_and_logs_an_error(self):
+        """sw.js listed but not built -> 404 and an ERROR log line."""
+        with override_settings(DJKIT_SPA_INDEX="/nonexistent/index.html", DJKIT_SPA_ROOT_FILES=self.FILES):
+            with self.assertLogs("djkit.views", level="ERROR"):
+                response = views.spa_root_file(RequestFactory().get("/sw.js"), "sw.js")
+        self.assertEqual(response.status_code, 404)
+
+    def test_missing_setting_raises_improperly_configured(self):
+        """DJKIT_SPA_ROOT_FILES unset -> ImproperlyConfigured."""
+        with override_settings(DJKIT_SPA_INDEX="/x/index.html"):
+            from django.conf import settings
+
+            if hasattr(settings, "DJKIT_SPA_ROOT_FILES"):
+                del settings.DJKIT_SPA_ROOT_FILES
+            with self.assertRaises(ImproperlyConfigured):
+                views.spa_root_file(RequestFactory().get("/sw.js"), "sw.js")

@@ -22,6 +22,12 @@ catch-all route after the API (a path no API route matches ends there):
 
     urlpatterns = [path("api/", api.urls), re_path(r"^api/", page_not_found)]
 
+`spa_root_file` serves the few build files that must live at the site root
+(e.g. a service worker), listed in DJKIT_SPA_ROOT_FILES
+({name: content type}), before the catch-all:
+
+    re_path(r"^(?P<name>sw\\.js)$", spa_root_file)
+
 `spa_index` serves the index.html of a single-page application build for
 every other path, so client-side routes survive a page reload:
 
@@ -119,5 +125,43 @@ def spa_index(request) -> HttpResponse:
         logger.error("SPA index not found at %s: build the frontend first.", path)
         return error_response("not_found", 404)
     response = HttpResponse(path.read_bytes(), content_type="text/html; charset=utf-8")
+    response["Cache-Control"] = "no-cache"
+    return response
+
+
+def spa_root_file(request, name: str) -> HttpResponse:
+    """
+    Serves one file of the SPA build from the site root (e.g. /sw.js).
+
+    A service worker controls only the paths under its own URL, so it must
+    be served from "/" even when the build's assets live under STATIC_URL;
+    other root files (e.g. a web app manifest) can be listed too. Only the names listed in
+    DJKIT_SPA_ROOT_FILES are served (never a path built from the URL), from
+    the folder of DJKIT_SPA_INDEX, with `Cache-Control: no-cache` so a new
+    service worker is picked up at once.
+
+    Args:
+        request: the request.
+        name: file name captured by the URL pattern.
+
+    Returns:
+        200 with the file and the content type of DJKIT_SPA_ROOT_FILES, or
+        404 {"detail": ...} ("not_found") for a name not listed or a file
+        missing from the build (the latter is logged as an error).
+
+    Raises:
+        ImproperlyConfigured: DJKIT_SPA_INDEX or DJKIT_SPA_ROOT_FILES is not set.
+    """
+    index = getattr(settings, "DJKIT_SPA_INDEX", None)
+    files = getattr(settings, "DJKIT_SPA_ROOT_FILES", None)
+    if index is None or files is None:
+        raise ImproperlyConfigured("DJKIT_SPA_INDEX and DJKIT_SPA_ROOT_FILES must be set for spa_root_file.")
+    if name not in files:
+        return error_response("not_found", 404)
+    path = Path(index).parent / name
+    if not path.is_file():
+        logger.error("SPA root file not found at %s: build the frontend first.", path)
+        return error_response("not_found", 404)
+    response = HttpResponse(path.read_bytes(), content_type=files[name])
     response["Cache-Control"] = "no-cache"
     return response
