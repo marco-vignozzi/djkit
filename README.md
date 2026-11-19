@@ -9,8 +9,6 @@ Modifiche per versione: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Installazione
 
-Il repository è privato: serve un accesso GitHub con permesso di lettura.
-
 ```bash
 pip install "djkit @ git+https://github.com/marco-vignozzi/djkit.git@v0.7.0"
 ```
