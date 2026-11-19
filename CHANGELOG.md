@@ -3,7 +3,7 @@
 All notable changes to djkit. Versions follow semantic versioning
 (MAJOR: incompatible changes, MINOR: new features, PATCH: fixes).
 
-## [0.7.0] — unreleased
+## [0.7.0] — 2026-11-19
 
 ### Added (SPA root files)
 - `views.spa_root_file(request, name)`: serves the build files listed in

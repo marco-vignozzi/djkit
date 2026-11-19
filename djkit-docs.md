@@ -26,8 +26,8 @@ Legenda: ✅ implementato e testato · 📝 progettato, non ancora implementato 
    oppure si legge da `settings` con un default: `getattr(settings, "DJKIT_...", default)`.
 3. **Solo modelli astratti.** `djkit` non ha tabelle né migrazioni proprie: il progetto eredita i modelli astratti
    e crea le sue tabelle. Così l'estrazione come pacchetto non richiede migrazioni.
-4. **Test propri.** I test stanno in `djkit/tests/` e passano da soli: `python manage.py test djkit`.
-5. **Versione semantica.** `__version__` in `djkit/__init__.py`, con le modifiche annotate in `djkit/CHANGELOG.md`.
+4. **Test propri.** I test stanno in `src/djkit/tests/` e girano con il progetto di prova in `testproject/` su PostgreSQL: vedi README.
+5. **Versione semantica.** `__version__` in `src/djkit/__init__.py` (unica fonte: `pyproject.toml` la legge da lì), con le modifiche annotate in `CHANGELOG.md`.
    - **MAJOR**: firme cambiate in modo incompatibile o funzioni rimosse.
    - **MINOR**: nuove funzioni o nuovi parametri opzionali.
    - **PATCH**: correzioni che non cambiano l'interfaccia.

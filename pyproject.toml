@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "djkit"
+dynamic = ["version"]
+description = "Reusable Django/Ninja framework: auth, audit, access, API helpers."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "Django>=6.1,<6.2",
+    "django-ninja>=1.8,<2",
+]
+
+[project.optional-dependencies]
+dev = ["psycopg[binary]>=3.2", "tblib>=3"]
+
+[tool.setuptools.dynamic]
+version = {attr = "djkit.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["djkit*"]
